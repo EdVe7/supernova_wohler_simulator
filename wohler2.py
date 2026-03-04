@@ -7,8 +7,18 @@ import datetime
 import time
 
 # --- CONFIGURAZIONE PAGINA ---
+import streamlit as st
+import numpy as np
+import plotly.graph_objects as go
+import math
+from fpdf import FPDF
+import datetime
+import time # <--- QUESTO RISOLVE IL NAMEERROR
 
-# Configurazione interfaccia pulita (nasconde menu e header Streamlit)
+# --- CONFIGURAZIONE PAGINA ---
+st.set_page_config(page_title="Supernova Fatigue Lab", page_icon="🚀")
+
+# CSS per pulizia interfaccia
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
@@ -25,9 +35,10 @@ if 'splash_done' not in st.session_state:
             st.image("logo.png", use_container_width=True)
         except:
             st.markdown("<h1 style='text-align:center; color:#FF9800;'>SUPERNOVA</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align:center;'>Powered by Supernova </p>", unsafe_allow_html=True)
-    time.sleep(5) # Durata visualizzazione
+        st.markdown("<p style='text-align:center;'>Powered by Supernova Sport Science</p>", unsafe_allow_html=True)
+    time.sleep(5) 
     placeholder.empty()
+    st.session_state['splash_done'] = True # Segna lo splash come fatto
 
 # SISTEMA DI LOGIN
 if "authenticated" not in st.session_state:
@@ -35,14 +46,14 @@ if "authenticated" not in st.session_state:
 
 if not st.session_state["authenticated"]:
     st.markdown("<h2 style='text-align:center;'>Accesso Riservato</h2>", unsafe_allow_html=True)
-    pwd = st.text_input("Inserisci Master Password", type="password")
+    pwd = st.text_input("Inserisci la Password", type="password")
     if st.button("ENTRA NEL LAB"):
-        if pwd == "supernova26": # Cambia la password qui
+        if pwd == "supernova26":
             st.session_state["authenticated"] = True
             st.rerun()
         else:
             st.error("Password errata.")
-    st.stop() # Blocca l'esecuzione del resto del codice
+    st.stop()
 
 # --- 1. DATABASE MATERIALI ---
 materials_db = {
@@ -238,4 +249,5 @@ if st.button("📄 Scarica Report Tecnico (PDF)"):
         mime="application/pdf"
 
     )
+
 
