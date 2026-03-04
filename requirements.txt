@@ -1,5 +1,5 @@
 streamlit
 numpy
+plotly
 fpdf
-plotly.graph_objects
 
