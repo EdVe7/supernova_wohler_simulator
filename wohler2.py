@@ -6,10 +6,42 @@ from fpdf import FPDF
 import datetime
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="Vector Lab | Fatigue Report", layout="wide", page_icon="⚙️")
 
-st.title("Vector Lab: Fatigue Analysis (No-Kaleido Version)")
-st.markdown("Calcolo a fatica con report tabellare professionale (senza dipendenze grafiche pesanti).")
+# Configurazione interfaccia pulita (nasconde menu e header Streamlit)
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
+    .stDeployButton {display:none;}
+    </style>
+    """, unsafe_allow_html=True)
+
+# SPLASH SCREEN SUPERNOVA
+if 'splash_done' not in st.session_state:
+    placeholder = st.empty()
+    with placeholder.container():
+        st.markdown("<br><br><br>", unsafe_allow_html=True)
+        try:
+            st.image("logo.png", use_container_width=True)
+        except:
+            st.markdown("<h1 style='text-align:center; color:#FF9800;'>SUPERNOVA</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align:center;'>Powered by Supernova </p>", unsafe_allow_html=True)
+    time.sleep(5) # Durata visualizzazione
+    placeholder.empty()
+
+# SISTEMA DI LOGIN
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    st.markdown("<h2 style='text-align:center;'>Accesso Riservato</h2>", unsafe_allow_html=True)
+    pwd = st.text_input("Inserisci Master Password", type="password")
+    if st.button("ENTRA NEL LAB"):
+        if pwd == "supernova26": # Cambia la password qui
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Password errata.")
+    st.stop() # Blocca l'esecuzione del resto del codice
 
 # --- 1. DATABASE MATERIALI ---
 materials_db = {
@@ -106,10 +138,19 @@ st.plotly_chart(fig, use_container_width=True)
 class TablePDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 14)
-        self.cell(0, 10, 'VECTOR LAB - REPORT ANALISI FATICA', 0, 1, 'C')
+        self.cell(0, 10, 'SUPERNOVA - REPORT ANALISI FATICA', 0, 1, 'C')
         self.line(10, 20, 200, 20)
         self.ln(5)
 
+    def footer(self):
+        # Posiziona il footer a 1.5 cm dal fondo
+        self.set_y(-15)
+        self.set_font('Arial', 'I', 8)
+        self.set_text_color(128)
+        # Firma sul report
+        self.cell(0, 10, 'Powered by Supernova', 0, 0, 'C')
+        self.cell(0, 10, f'Pagina {self.page_no()}', 0, 0, 'R')
+        
     def chapter_title(self, title):
         self.set_font('Arial', 'B', 12)
         self.set_fill_color(230, 230, 230)
@@ -194,4 +235,5 @@ if st.button("📄 Scarica Report Tecnico (PDF)"):
         data=pdf_bytes,
         file_name="Report_Fatica_VectorLab.pdf",
         mime="application/pdf"
+
     )
