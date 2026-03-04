@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 import math
 from fpdf import FPDF
 import datetime
+import time
 
 # --- CONFIGURAZIONE PAGINA ---
 
@@ -237,3 +238,4 @@ if st.button("📄 Scarica Report Tecnico (PDF)"):
         mime="application/pdf"
 
     )
+
