@@ -1,11 +1,3 @@
-import streamlit as st
-import numpy as np
-import plotly.graph_objects as go
-import math
-from fpdf import FPDF
-import datetime
-import time
-
 # --- CONFIGURAZIONE PAGINA ---
 import streamlit as st
 import numpy as np
@@ -249,5 +241,6 @@ if st.button("📄 Scarica Report Tecnico (PDF)"):
         mime="application/pdf"
 
     )
+
 
 
