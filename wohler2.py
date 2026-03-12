@@ -1,3 +1,4 @@
+# --- CONFIGURAZIONE PAGINA E LIBRERIE ---
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
@@ -10,190 +11,304 @@ import matplotlib.pyplot as plt
 import tempfile
 import os
 
-# --- 1. CONFIGURAZIONE ESTETICA (ORO, NERO, BIANCO) ---
-st.set_page_config(page_title="Supernova Lab", page_icon="🚀", layout="wide")
+st.set_page_config(page_title="Supernova Fatigue Lab", page_icon="🚀", layout="wide")
 
-GOLD = "#D4AF37"
-BLACK = "#000000"
-WHITE = "#FFFFFF"
-
-st.markdown(f"""
+st.markdown("""
     <style>
-    .stApp {{ background-color: {BLACK}; color: {WHITE}; }}
-    h1, h2, h3 {{ color: {GOLD} !important; text-transform: uppercase; }}
-    .stButton>button {{ border: 2px solid {GOLD}; color: {GOLD}; background: transparent; border-radius: 0; width: 100%; font-weight: bold; }}
-    .stButton>button:hover {{ background: {GOLD}; color: {BLACK}; }}
-    .stTextInput>div>div>input, .stNumberInput>div>div>input, .stSelectbox>div>div>div {{
-        background-color: #1A1A1A !important; color: {WHITE} !important; border: 1px solid {GOLD} !important;
-    }}
-    [data-testid="stMetricValue"] {{ color: {GOLD} !important; }}
-    .stTabs [data-baseweb="tab-list"] {{ gap: 20px; }}
-    .stTabs [aria-selected="true"] {{ border-bottom: 2px solid {GOLD} !important; color: {GOLD} !important; }}
-    #MainMenu, footer, header {{ visibility: hidden; }}
+    #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
+    .stDeployButton {display:none;}
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. SISTEMA DI LOGIN PERSONALIZZATO ---
-if "auth" not in st.session_state:
-    st.session_state["auth"] = False
-    st.session_state["atleta"] = ""
+# ==========================================
+# SPLASH SCREEN E LOGIN
+# ==========================================
+if 'splash_done' not in st.session_state:
+    placeholder = st.empty()
+    with placeholder.container():
+        st.markdown("<br><br><br>", unsafe_allow_html=True)
+        try:
+            st.image("logo.png", use_container_width=True)
+        except:
+            st.markdown("<h1 style='text-align:center; color:#FF9800;'>SUPERNOVA</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align:center;'>Advanced Paralympic Prosthetics Lab</p>", unsafe_allow_html=True)
+    time.sleep(3) 
+    placeholder.empty()
+    st.session_state['splash_done'] = True
 
-if not st.session_state["auth"]:
-    st.markdown("<h1 style='text-align:center;'>SUPERNOVA LAB</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='text-align:center; color:{GOLD};'>DATA OVER TALENT.</p>", unsafe_allow_html=True)
-    col_a, col_b, col_c = st.columns([1,1.5,1])
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    st.markdown("<h3 style='text-align:center;'>🔒 Accesso Riservato Lab</h3>", unsafe_allow_html=True)
+    col_a, col_b, col_c = st.columns([1,2,1])
     with col_b:
-        user = st.text_input("Username (Nome Atleta)")
-        pwd = st.text_input("Password", type="password")
-        if st.button("ACCEDI"):
-            if pwd == "supernova26" and user != "":
-                st.session_state["auth"] = True
-                st.session_state["atleta"] = user
+        pwd = st.text_input("Inserisci la Password", type="password")
+        if st.button("ENTRA NEL LAB", use_container_width=True):
+            if pwd == "supernova26":
+                st.session_state["authenticated"] = True
                 st.rerun()
-            else: st.error("Credenziali non valide.")
+            else:
+                st.error("Password errata.")
     st.stop()
 
-# --- 3. DATABASE MATERIALI E CARICHI ---
+# ==========================================
+# 1. DATABASE MATERIALI PROTESICI AVANZATI
+# ==========================================
 materials_db = {
-    "Carbonio UD (Lame Corsa)": {"uts": 1800, "yield": 1800, "se_base": 1050, "cat": "Compositi"},
-    "Titanio Ti-6Al-4V ELI": {"uts": 860, "yield": 795, "se_base": 440, "cat": "Metalli"},
-    "Acciaio Maraging 250": {"uts": 1750, "yield": 1700, "se_base": 850, "cat": "Metalli"},
-    "Alluminio 7075-T6": {"uts": 572, "yield": 503, "se_base": 159, "cat": "Metalli"},
-    "PEEK (Socket Alta Resistenza)": {"uts": 100, "yield": 100, "se_base": 45, "cat": "Polimeri"}
+    "Titanio Ti-6Al-4V (Piloni/Giunti)": {"uts": 950, "yield": 880, "se_base": 510, "cat": "Metalli"},
+    "Titanio Grado 5 ELI (Impianti)": {"uts": 860, "yield": 795, "se_base": 440, "cat": "Metalli"},
+    "Fibra Carbonio UD (Lame Corsa)": {"uts": 1500, "yield": 1500, "se_base": 900, "cat": "Compositi"},
+    "Kevlar/Epoxy (Socket Strutturale)": {"uts": 1300, "yield": 1200, "se_base": 750, "cat": "Compositi"},
+    "Alluminio 7075-T6 (Ergal - Raccordi)": {"uts": 572, "yield": 503, "se_base": 159, "cat": "Metalli"},
+    "Alluminio 2024-T3 (Aeronautico)": {"uts": 483, "yield": 345, "se_base": 138, "cat": "Metalli"},
+    "PEEK (Componenti Flessibili/Socket)": {"uts": 100, "yield": 100, "se_base": 45, "cat": "Polimeri"},
+    "Acciaio Inox 316L (Viteria/Giunti)": {"uts": 485, "yield": 170, "se_base": 290, "cat": "Metalli"},
+    "Acciaio 4340 (High Strength)": {"uts": 1100, "yield": 950, "se_base": 550, "cat": "Metalli"}
 }
 
-# --- 4. SIDEBAR INTEGRATA ---
+# ==========================================
+# 2. INPUT USER (SIDEBAR)
+# ==========================================
 with st.sidebar:
-    st.markdown(f"<h2 style='color:{GOLD};'>CONFIGURAZIONE</h2>", unsafe_allow_html=True)
-    st.write(f"Atleta: **{st.session_state['atleta']}**")
-    sport = st.selectbox("Sport", ["Golf", "Sprint", "Salto in Lungo", "Ciclismo"])
-    
-    st.markdown("---")
-    mat_name = st.selectbox("Materiale Protesi", list(materials_db.keys()))
+    st.header("🏃 Dati Atleta e Setup")
+    atleta_nome = st.text_input("Nome Atleta", "Atleta Paralimpico")
+    atleta_peso = st.number_input("Peso Atleta (kg)", value=75)
+    sport_target = st.text_input("Sport / Obiettivo", "Golf - Olimpiadi 2040")
+
+    st.header("⚙️ Parametri Materiale")
+    mat_name = st.selectbox("Seleziona Materiale", list(materials_db.keys()))
     mat = materials_db[mat_name]
     
+    st.header("📉 Fattori Marin")
     surf = st.selectbox("Finitura Superficiale", ["Lucidato", "Lavorato", "Grezzo", "Forgiato"])
+    # Aggiunti carichi complessi tipici delle protesi
+    load = st.selectbox("Tipo Carico", ["Flessione (Impatto Corsa)", "Assiale (Carico Statico)", "Torsione (Cambio Direzione)", "Flesso-Torsione Combinata"])
+    rel = st.selectbox("Affidabilità Richiesta", ["50%", "90%", "95%", "99%", "99.9%", "99.99% (Aerospace)"])
     
-    load_type = st.selectbox("Tipo di Carico", ["Flessione", "Assiale", "Torsione"])
-    
-    st.info("Affidabilità impostata al 99.9% (Standard Supernova)")
-    ke = 0.753 # 99.9% costante
+    st.header("⚖️ Spettro di Carico")
+    s_max = st.number_input("Stress Max (MPa)", value=400, help="Carico di picco durante l'impatto o lo swing")
+    s_min = st.number_input("Stress Min (MPa)", value=0, help="Carico a riposo")
+    cycles_yr = st.number_input("Cicli Previsti / Anno", value=100000, step=10000)
 
-# --- 5. MOTORE DI CALCOLO (IL CUORE FUNZIONANTE) ---
-def get_ka(uts, surf_type, mat_cat):
-    if mat_cat == "Compositi": return 0.9
+# ==========================================
+# 3. MOTORE FISICO (CALCOLI)
+# ==========================================
+def get_k_factors(uts, surf_type, load_type, rel_type, mat_cat):
+    # Superficie (ka)
     surfs = {"Lucidato": (1.58, -0.085), "Lavorato": (4.51, -0.265), "Grezzo": (57.7, -0.718), "Forgiato": (272.0, -0.995)}
-    a, b = surfs[surf_type]
-    return min(a * (uts ** b), 1.0)
+    if mat_cat in ["Compositi", "Polimeri"]: 
+        ka = 0.9  # I compositi e polimeri sono meno sensibili alla finitura standard
+    else:
+        a, b = surfs[surf_type]
+        ka = min(a * (uts ** b), 1.0)
+    
+    # Carico (kc)
+    loads = {"Flessione (Impatto Corsa)": 1.0, "Assiale (Carico Statico)": 0.85, "Torsione (Cambio Direzione)": 0.59, "Flesso-Torsione Combinata": 0.75}
+    kc = loads[load_type]
+    
+    # Affidabilità (ke)
+    rels = {"50%": 1.0, "90%": 0.897, "95%": 0.868, "99%": 0.814, "99.9%": 0.753, "99.99% (Aerospace)": 0.702}
+    ke = rels[rel_type]
+    
+    return ka, kc, ke
 
-ka = get_ka(mat['uts'], surf, mat['cat'])
-kc = {"Flessione": 1.0, "Assiale": 0.85, "Torsione": 0.59}[load_type]
+ka, kc, ke = get_k_factors(mat['uts'], surf, load, rel, mat['cat'])
 se_corr = mat['se_base'] * ka * kc * ke
 
-def solve_fatigue(s_max, s_min, mat_data, se_corr_val):
-    sigma_a = (s_max - s_min) / 2
-    sigma_m = (s_max + s_min) / 2
-    if sigma_m >= mat_data['uts']: return 9999, 0, 0, 0 # Rottura
-    s_eq = sigma_a / (1 - (sigma_m / mat_data['uts']))
-    
-    if s_eq <= se_corr_val: return s_eq, float('inf'), 0, 0
-    
+# Stress Goodman
+sigma_a = (s_max - s_min) / 2
+sigma_m = (s_max + s_min) / 2
+if sigma_m >= mat['uts']:
+    s_eq = 99999 # Rottura statica immediata
+else:
+    s_eq = sigma_a / (1 - (sigma_m / mat['uts']))
+
+# Vita a Fatica (Basquin)
+if s_eq <= se_corr:
+    Nf = "Infinito"
+    years = "Infinito"
+elif s_max >= mat['uts']:
+    Nf = 0
+    years = 0
+else:
     f = 0.9
-    S1000 = f * mat_data['uts']
-    N_end = 1e6 if mat_data['cat'] != "Alluminio" else 5e8
-    b_exp = -(math.log10(S1000/se_corr_val)) / (math.log10(N_end)-3)
-    log_a = math.log10(S1000) - 3*b_exp
-    nf = 10 ** ((math.log10(s_eq) - log_a)/b_exp)
-    return s_eq, nf, log_a, b_exp
-
-# --- 6. INTERFACCIA A DUE SETTORI ---
-tab1, tab2 = st.tabs(["[ FATIGUE SIMULATOR ]", "[ RACE DAMAGE SIM ]"])
-
-# --- SETTORE 1: FATICA ---
-with tab1:
-    col1, col2 = st.columns(2)
-    s_max = col1.number_input("Stress Max (MPa)", value=400, key="sm1")
-    s_min = col2.number_input("Stress Min (MPa)", value=0, key="sn1")
-    c_anno = st.number_input("Cicli/Anno", value=100000)
+    S1000 = f * mat['uts']
+    N_end = 1e6 if mat['cat'] not in ["Alluminio", "Polimeri"] else 5e8
+    b = -(math.log10(S1000/se_corr)) / (math.log10(N_end)-3)
+    log_a = math.log10(S1000) - 3*b
     
-    s_eq, nf, log_a, b_exp = solve_fatigue(s_max, s_min, mat, se_corr)
-    anni = round(nf/c_anno, 2) if nf != float('inf') else "Infinito"
+    Nf_val = 10 ** ((math.log10(s_eq) - log_a)/b)
+    Nf = int(Nf_val)
+    years = round(Nf_val / cycles_yr, 2)
 
-    st.divider()
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Stress Eq. (Goodman)", f"{int(s_eq)} MPa")
-    m2.metric("Limite Fatica (Se)", f"{int(se_corr)} MPa")
-    m3.metric("Vita Stimata", f"{anni} anni")
+# Calcolo dati curva
+n_x = np.logspace(3, 8, 50)
+s_y = (10**log_a) * (n_x**b) if isinstance(Nf, int) and Nf > 0 else np.zeros_like(n_x)
+s_y = np.maximum(s_y, se_corr)
 
-    # Grafico Plotly
-    n_plot = np.logspace(3, 7, 100)
-    if nf != float('inf') and b_exp != 0:
-        s_plot = (10**log_a) * (n_plot**b_exp)
-        s_plot = np.maximum(s_plot, se_corr)
-    else: s_plot = np.full_like(n_plot, se_corr)
+# ==========================================
+# 4. VISUALIZZAZIONE UI (Plotly)
+# ==========================================
+st.title("🦾 Analisi Strutturale Protesi")
+c1, c2, c3 = st.columns(3)
+c1.metric("Stress Eq. (Goodman)", f"{int(s_eq)} MPa")
+c2.metric("Limite Fatica Corretto", f"{int(se_corr)} MPa")
+c3.metric("Vita Utile Stimata", f"{years} anni" if isinstance(years, (int, float)) else years)
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=n_plot, y=s_plot, name="Wöhler Curve", line=dict(color=GOLD)))
-    fig.update_layout(xaxis_type="log", template="plotly_dark", title="ANALISI S-N")
-    st.plotly_chart(fig, use_container_width=True)
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=n_x, y=s_y, name="Curva Wöhler S-N", line=dict(color='#2CB8C8', width=3)))
+if isinstance(Nf, int) and Nf > 0:
+    fig.add_trace(go.Scatter(x=[Nf], y=[s_eq], mode='markers', marker=dict(color='#FF4B4B', size=12), name="Punto Operativo (Rottura)"))
+fig.add_hline(y=se_corr, line_dash="dash", line_color="green", annotation_text="Limite di Vita Infinita")
+fig.update_layout(xaxis_type="log", title="Curva di Fatica (Wöhler) Interattiva", height=400, xaxis_title="Cicli (N)", yaxis_title="Stress Alternato (MPa)")
+st.plotly_chart(fig, use_container_width=True)
 
-# --- SETTORE 2: GARA ---
-with tab2:
-    st.subheader("Simulatore Performance in Gara")
-    c_r1, c_r2 = st.columns(2)
-    durata_gara = c_r1.number_input("Durata Gara (minuti)", value=60)
-    freq_passi = c_r2.number_input("Frequenza (passi/min)", value=90)
-    s_max_race = st.number_input("Stress Picco in Gara (MPa)", value=500)
+
+
+# ==========================================
+# 5. GENERATORE GRAFICO SEABORN (PER PDF)
+# ==========================================
+def create_seaborn_temp_image():
+    plt.figure(figsize=(10, 5))
+    sns.set_theme(style="whitegrid")
     
-    cicli_gara = durata_gara * freq_passi
-    s_eq_r, nf_r, _, _ = solve_fatigue(s_max_race, 0, mat, se_corr)
+    # Traccia la curva
+    ax = sns.lineplot(x=n_x, y=s_y, color="#2CB8C8", linewidth=2.5, label="Curva Wöhler (Materiale)")
+    ax.set_xscale("log")
     
-    danno = (cicli_gara / nf_r) * 100 if nf_r != float('inf') else 0
-    rendimento = max(0, 100 - (danno * 1.5)) # Formula Supernova: il danno degrada il ritorno elastico
+    # Asintoto
+    plt.axhline(se_corr, color='green', linestyle='--', linewidth=1.5, label=f"Limite Fatica ({int(se_corr)} MPa)")
     
-    st.divider()
-    r1, r2, r3 = st.columns(3)
-    r1.metric("Cicli Totali Gara", int(cicli_gara))
-    r2.metric("Danno Strutturale", f"{danno:.4f} %")
-    r3.metric("Rendimento Residuo", f"{rendimento:.1f} %")
+    # Punto operativo
+    if isinstance(Nf, int) and Nf > 0:
+        plt.scatter([Nf], [s_eq], color="#FF4B4B", zorder=5, s=150, label="Punto di Lavoro Protesi")
     
-    if danno > 100: st.error("PERICOLO: Cedimento previsto durante la gara!")
-    elif danno > 50: st.warning("ATTENZIONE: Alto degrado strutturale.")
-    else: st.success("Gara sicura: Integrità strutturale ottimale.")
+    plt.xlabel("Numero di Cicli a Rottura (Log N)", fontsize=11, fontweight='bold')
+    plt.ylabel("Stress Equivalente (MPa)", fontsize=11, fontweight='bold')
+    plt.title(f"Analisi S-N: {mat_name}", fontsize=14, fontweight='bold')
+    plt.legend()
+    
+    # Salva in temp file
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    plt.savefig(tmp_file.name, format="png", bbox_inches="tight", dpi=300)
+    plt.close()
+    return tmp_file.name
 
-# --- 7. PDF ENGINE (ORO E NERO) ---
-def generate_pdf(mode="Fatigue"):
-    pdf = FPDF()
+# ==========================================
+# 6. PDF ENGINE AVANZATO (Con Immagine)
+# ==========================================
+class TablePDF(FPDF):
+    def header(self):
+        self.set_font('Arial', 'B', 15)
+        self.set_text_color(44, 184, 200) # Colore Brand Turchese
+        self.cell(0, 10, 'SUPERNOVA LAB - PROSTHETICS FATIGUE REPORT', 0, 1, 'C')
+        self.line(10, 20, 200, 20)
+        self.ln(5)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('Arial', 'I', 8)
+        self.set_text_color(128)
+        self.cell(0, 10, 'Powered by Supernova Sport Science', 0, 0, 'C')
+        self.cell(0, 10, f'Pagina {self.page_no()}', 0, 0, 'R')
+        
+    def chapter_title(self, title):
+        self.set_font('Arial', 'B', 12)
+        self.set_fill_color(240, 240, 240)
+        self.set_text_color(0, 0, 0)
+        self.cell(0, 8, title, 0, 1, 'L', 1)
+        self.ln(2)
+
+    def add_table_row(self, col1, col2, col3, header=False):
+        if header:
+            self.set_font('Arial', 'B', 10)
+        else:
+            self.set_font('Arial', '', 10)
+        w = [85, 55, 50] 
+        h = 7
+        self.cell(w[0], h, str(col1), 1)
+        self.cell(w[1], h, str(col2), 1)
+        self.cell(w[2], h, str(col3), 1, 0, 'C')
+        self.ln()
+
+def generate_full_pdf():
+    pdf = TablePDF()
     pdf.add_page()
-    pdf.set_fill_color(0, 0, 0)
-    pdf.rect(0, 0, 210, 40, 'F')
-    pdf.set_font("Arial", 'B', 16)
-    pdf.set_text_color(212, 175, 55) # ORO
-    pdf.cell(0, 20, "SUPERNOVA - DATA OVER TALENT", 0, 1, 'C')
     
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Arial", 'B', 12)
-    pdf.ln(10)
-    pdf.cell(0, 10, f"REPORT: {mode.upper()}", 0, 1)
-    pdf.set_font("Arial", '', 10)
-    pdf.cell(0, 7, f"Atleta: {st.session_state['atleta']}", 0, 1)
-    pdf.cell(0, 7, f"Sport: {sport}", 0, 1)
-    pdf.cell(0, 7, f"Materiale: {mat_name} | Finitura: {surf}", 0, 1)
+    # --- SEZIONE 0: DATI ATLETA ---
+    pdf.set_font('Arial', 'B', 11)
+    pdf.cell(0, 6, f"Atleta: {atleta_nome} ({atleta_peso} kg)", 0, 1)
+    pdf.cell(0, 6, f"Target Event: {sport_target}", 0, 1)
+    pdf.cell(0, 6, f"Data Analisi: {datetime.datetime.now().strftime('%d/%m/%Y')}", 0, 1)
+    pdf.ln(5)
+
+    # --- SEZIONE 1: INPUT ---
+    pdf.chapter_title("1. Parametri di Configurazione")
+    pdf.add_table_row("Parametro", "Valore", "Note", header=True)
+    pdf.add_table_row("Materiale Scelto", mat_name, mat['cat'])
+    pdf.add_table_row("Carico Rottura Statico (UTS)", f"{mat['uts']}", "MPa")
+    pdf.add_table_row("Limite Snervamento (Yield)", f"{mat['yield']}", "MPa")
+    pdf.add_table_row("Cicli Annuali Previsti", f"{cycles_yr:,}", "Cicli/y")
+    pdf.ln(3)
+
+    # --- SEZIONE 2: FATIGUE MODIFIERS ---
+    pdf.chapter_title("2. Condizioni Ambientali e di Carico (Marin)")
+    pdf.add_table_row("Fattore Correttivo", "Coefficiente", "Condizione Applicata", header=True)
+    pdf.add_table_row("Finitura Superficiale (ka)", f"{ka:.3f}", surf)
+    pdf.add_table_row("Vettore di Carico (kc)", f"{kc:.2f}", load)
+    pdf.add_table_row("Sicurezza/Affidabilità (ke)", f"{ke:.3f}", rel)
+    pdf.ln(3)
+
+    # --- SEZIONE 3: RISULTATI ---
+    pdf.chapter_title("3. Output Analisi Strutturale")
+    pdf.add_table_row("Grandezza", "Valore", "Unità", header=True)
+    pdf.add_table_row("Limite Fatica Ideale", f"{mat['se_base']}", "MPa")
+    pdf.add_table_row("Limite Fatica Reale (Se)", f"{int(se_corr)}", "MPa")
+    pdf.add_table_row("Stress Massimo Applicato", f"{s_max}", "MPa")
+    pdf.add_table_row("Stress Teorico (Goodman)", f"{int(s_eq)}", "MPa")
     pdf.ln(5)
     
-    # Dati tecnici
-    pdf.set_fill_color(212, 175, 55)
-    pdf.cell(0, 8, "RISULTATI TECNICI", 1, 1, 'L', True)
-    if mode == "Fatigue":
-        pdf.cell(0, 7, f"Stress Eq: {int(s_eq)} MPa", 1, 1)
-        pdf.cell(0, 7, f"Vita Utile: {anni} anni", 1, 1)
+    # BOX CONCLUSIVO VITA
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 8, "PREVISIONE VITA UTILE COMPONENTE:", 0, 1)
+    if isinstance(years, (int, float)):
+        res_text = f"{Nf:,} Cicli di Esercizio  (Stima: {years} Anni)"
+        color = (0, 128, 0) if years > 5 else (200, 0, 0)
     else:
-        pdf.cell(0, 7, f"Danno in Gara: {danno:.4f} %", 1, 1)
-        pdf.cell(0, 7, f"Rendimento Finale: {rendimento:.1f} %", 1, 1)
+        res_text = f"Resistenza Strutturale: {Nf}"
+        color = (0, 0, 200)
+
+    pdf.set_font('Arial', 'B', 13)
+    pdf.set_text_color(*color)
+    pdf.cell(0, 10, res_text, 1, 1, 'C')
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(5)
+
+    # --- SEZIONE 4: GRAFICO WOHLER SEABORN ---
+    pdf.chapter_title("4. Mappa Decadimento Strutturale (Curva S-N)")
+    img_path = create_seaborn_temp_image()
+    # Inserisce l'immagine nel PDF (x=10, width=190mm adatta all'A4)
+    pdf.image(img_path, x=10, w=190)
+    
+    # Pulisce il file temporaneo per non intasare il server
+    os.remove(img_path)
     
     return pdf.output(dest='S').encode('latin-1')
 
-st.sidebar.divider()
-if st.sidebar.button("SCARICA REPORT PDF"):
-    pdf_bytes = generate_pdf("Lifecycle" if tab1 else "Race")
-    st.sidebar.download_button("Download .pdf", pdf_bytes, "Supernova_Report.pdf")
+# ==========================================
+# 7. DOWNLOAD AREA
+# ==========================================
+st.markdown("---")
+if st.button("📄 Genera & Scarica Report Avanzato (PDF con Grafico)"):
+    try:
+        pdf_bytes = generate_full_pdf()
+        st.download_button(
+            label="Clicca qui per scaricare il File .pdf",
+            data=pdf_bytes,
+            file_name=f"Report_Protesi_{atleta_nome.replace(' ', '_')}.pdf",
+            mime="application/pdf"
+        )
+        st.success("Report generato con successo! Il grafico Seaborn è stato incluso.")
+    except Exception as e:
+        st.error(f"Errore durante la generazione del PDF: {e}")
