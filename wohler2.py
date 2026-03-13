@@ -181,42 +181,100 @@ def create_seaborn_temp_image():
     plt.close()
     return tmp_file.name
 
+
 class TablePDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 15)
-        self.set_text_color(212, 175, 55) # ORO RGB
+        self.set_text_color(212, 175, 55) # Colore Oro Supernova
         self.cell(0, 10, 'SUPERNOVA LAB - PROSTHETICS FATIGUE REPORT', 0, 1, 'C')
+        self.line(10, 20, 200, 20)
         self.ln(5)
 
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('Arial', 'I', 8)
+        self.set_text_color(128)
+        self.cell(0, 10, 'Powered by Supernova Sport Science', 0, 0, 'C')
+        self.cell(0, 10, f'Pagina {self.page_no()}', 0, 0, 'R')
+        
     def chapter_title(self, title):
         self.set_font('Arial', 'B', 12)
         self.set_fill_color(240, 240, 240)
+        self.set_text_color(0, 0, 0)
         self.cell(0, 8, title, 0, 1, 'L', 1)
         self.ln(2)
 
-    def add_table_row(self, col1, col2, col3):
-        self.set_font('Arial', '', 10)
+    def add_table_row(self, col1, col2, col3, header=False):
+        if header:
+            self.set_font('Arial', 'B', 10)
+        else:
+            self.set_font('Arial', '', 10)
         self.cell(85, 7, str(col1), 1)
         self.cell(55, 7, str(col2), 1)
-        self.cell(50, 7, str(col3), 1, 1, 'C')
+        self.cell(50, 7, str(col3), 1, 0, 'C')
+        self.ln()
 
 def generate_full_pdf():
     pdf = TablePDF()
     pdf.add_page()
-    pdf.chapter_title("1. Condizioni Operative")
-    pdf.add_table_row("Materiale", mat_name, mat['cat'])
-    pdf.add_table_row("Temperatura", f"{temp_esercizio} C", f"kd={kd:.2f}")
-    pdf.add_table_row("Umidita Relativa", f"{umidita_relativa} %", f"kw={kw:.2f}")
+    
+    # --- SEZIONE 0: DATI ATLETA ---
+    pdf.set_font('Arial', 'B', 11)
+    pdf.cell(0, 6, f"Atleta: {atleta_nome} ({atleta_peso} kg)", 0, 1)
+    pdf.cell(0, 6, f"Target Event: {sport_target}", 0, 1)
+    pdf.cell(0, 6, f"Data Analisi: {datetime.datetime.now().strftime('%d/%m/%Y')}", 0, 1)
+    pdf.ln(5)
+
+    # --- SEZIONE 1: INPUT ---
+    pdf.chapter_title("1. Parametri di Configurazione")
+    pdf.add_table_row("Parametro", "Valore", "Note", header=True)
+    pdf.add_table_row("Materiale Scelto", mat_name, mat['cat'])
+    pdf.add_table_row("Carico Rottura Statico (UTS)", f"{mat['uts']}", "MPa")
+    pdf.add_table_row("Limite Snervamento (Yield)", f"{mat['yield']}", "MPa")
+    pdf.add_table_row("Cicli Annuali Previsti", f"{cycles_yr:,}", "Cicli/y")
+    pdf.ln(3)
+
+    # --- SEZIONE 2: FATIGUE MODIFIERS (CON TEMP E UMIDITA') ---
+    pdf.chapter_title("2. Condizioni Ambientali e di Carico (Marin)")
+    pdf.add_table_row("Fattore Correttivo", "Coefficiente", "Condizione Applicata", header=True)
+    pdf.add_table_row("Finitura Superficiale (ka)", f"{ka:.3f}", surf)
+    pdf.add_table_row("Vettore di Carico (kc)", f"{kc:.2f}", load)
+    pdf.add_table_row("Sicurezza/Affidabilità (ke)", f"{ke:.3f}", rel)
+    pdf.add_table_row("Fattore Termico (kd)", f"{kd:.3f}", f"{temp_esercizio} C")
+    pdf.add_table_row("Fattore Umidità (kw)", f"{kw:.3f}", f"{umidita_relativa} %")
+    pdf.ln(3)
+
+    # --- SEZIONE 3: RISULTATI ---
+    pdf.chapter_title("3. Output Analisi Strutturale")
+    pdf.add_table_row("Grandezza", "Valore", "Unità", header=True)
+    pdf.add_table_row("Limite Fatica Ideale", f"{mat['se_base']}", "MPa")
+    pdf.add_table_row("Limite Fatica Reale (Se)", f"{int(se_corr)}", "MPa")
+    pdf.add_table_row("Stress Massimo Applicato", f"{s_max}", "MPa")
+    pdf.add_table_row("Stress Teorico (Goodman)", f"{int(s_eq)}", "MPa")
     pdf.ln(5)
     
-    pdf.chapter_title("2. Risultati Analisi")
-    pdf.add_table_row("Limite Fatica Se", f"{int(se_corr)} MPa", "Corretto")
-    pdf.add_table_row("Stress Massimo", f"{s_max} MPa", "Input")
-    pdf.add_table_row("Vita Stimata", f"{years} Anni", "Output")
-    
+    # --- BOX CONCLUSIVO VITA ---
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 8, "PREVISIONE VITA UTILE COMPONENTE:", 0, 1)
+    if isinstance(years, (int, float)):
+        res_text = f"{Nf:,} Cicli di Esercizio  (Stima: {years} Anni)"
+        color = (0, 128, 0) if years > 5 else (200, 0, 0)
+    else:
+        res_text = f"Resistenza Strutturale: {Nf}"
+        color = (0, 0, 200)
+
+    pdf.set_font('Arial', 'B', 13)
+    pdf.set_text_color(*color)
+    pdf.cell(0, 10, res_text, 1, 1, 'C')
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(5)
+
+    # --- SEZIONE 4: GRAFICO WOHLER ---
+    pdf.chapter_title("4. Mappa Decadimento Strutturale (Curva S-N)")
     img_path = create_seaborn_temp_image()
     pdf.image(img_path, x=10, w=190)
     os.remove(img_path)
+    
     return pdf.output(dest='S').encode('latin-1')
 
 st.markdown("---")
@@ -227,4 +285,5 @@ if st.button("📄 Genera & Scarica Report Oro"):
         st.success("Report generato!")
     except Exception as e:
         st.error(f"Errore Generazione PDF: {e}")
+
 
