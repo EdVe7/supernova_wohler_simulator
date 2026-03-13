@@ -70,7 +70,7 @@ materials_db = {
 }
 
 # ==========================================
-# 2. INPUT USER (SIDEBAR) - Aggiunti Temp e Umidità
+# 2. INPUT USER (SIDEBAR)
 # ==========================================
 with st.sidebar:
     st.header("🏃 Dati Atleta e Setup")
@@ -79,6 +79,12 @@ with st.sidebar:
     sport_target = st.text_input("Sport / Obiettivo", "Golf - Olimpiadi 2040")
 
     st.header("⚙️ Parametri Ambientali")
+    mat_name = st.selectbox("Seleziona Materiale", list(materials_db.keys()))
+    
+    # --- QUESTA È LA RIGA FONDAMENTALE CHE MANCAVA O ERA DOPO ---
+    mat = materials_db[mat_name] 
+    # ------------------------------------------------------------
+
     temp_esercizio = st.slider("Temperatura Operativa (°C)", -20, 100, 25)
     umidita_relativa = st.slider("Umidità Relativa (%)", 0, 100, 0)
     
@@ -221,3 +227,4 @@ if st.button("📄 Genera & Scarica Report Oro"):
         st.success("Report generato!")
     except Exception as e:
         st.error(f"Errore Generazione PDF: {e}")
+
