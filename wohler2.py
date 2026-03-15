@@ -81,11 +81,10 @@ with st.sidebar:
     st.header("⚙️ Parametri Ambientali")
     mat_name = st.selectbox("Seleziona Materiale", list(materials_db.keys()))
     
-    # --- QUESTA È LA RIGA FONDAMENTALE CHE MANCAVA O ERA DOPO ---
     mat = materials_db[mat_name] 
-    # ------------------------------------------------------------
 
-    temp_esercizio = st.slider("Temperatura Operativa (°C)", -20, 100, 25)
+    # --- MODIFICA RICHIESTA: Limite slider a 50 ---
+    temp_esercizio = st.slider("Temperatura Operativa (°C)", -20, 50, 25)
     umidita_relativa = st.slider("Umidità Relativa (%)", 0, 100, 0)
     
     st.header("📉 Fattori Marin")
@@ -102,7 +101,6 @@ with st.sidebar:
 # 3. MOTORE FISICO (CALCOLI) - Integrazione k_d e k_w
 # ==========================================
 def get_k_factors(uts, surf_type, load_type, rel_type, mat_cat, temp, hum):
-    # ka, kc, ke (Invariati)
     surfs = {"Lucidato": (1.58, -0.085), "Lavorato": (4.51, -0.265), "Grezzo": (57.7, -0.718), "Forgiato": (272.0, -0.995)}
     ka = 0.9 if mat_cat in ["Compositi", "Polimeri"] else min(surfs[surf_type][0] * (uts ** surfs[surf_type][1]), 1.0)
     
@@ -112,14 +110,12 @@ def get_k_factors(uts, surf_type, load_type, rel_type, mat_cat, temp, hum):
     rels = {"50%": 1.0, "90%": 0.897, "99%": 0.814, "99.99%": 0.702}
     ke = rels.get(rel_type, 1.0)
     
-    # Fattore Temperatura (kd)
     if mat_cat == "Polimeri": kd = 1.0 if temp <= 25 else max(0.2, 1.0 - 0.015 * (temp - 25))
     elif mat_cat == "Compositi": kd = 1.0 if temp <= 30 else max(0.5, 1.0 - 0.008 * (temp - 30))
     else: kd = 1.0 if temp <= 450 else 1.0 - 0.0008 * (temp - 450)
 
-    # Fattore Umidità (kw) - Critico per Kevlar e Nylon
     if mat_cat in ["Compositi", "Polimeri"] and hum > 0:
-        kw = 1.0 - (0.002 * hum) # Degradazione max 20% in condizioni di saturazione
+        kw = 1.0 - (0.002 * hum) 
     else: kw = 1.0
         
     return ka, kc, ke, kd, kw
@@ -127,7 +123,6 @@ def get_k_factors(uts, surf_type, load_type, rel_type, mat_cat, temp, hum):
 ka, kc, ke, kd, kw = get_k_factors(mat['uts'], surf, load, rel, mat['cat'], temp_esercizio, umidita_relativa)
 se_corr = mat['se_base'] * ka * kc * ke * kd * kw
 
-# Stress Goodman e Basquin (Invariati)
 sigma_a = (s_max - s_min) / 2
 sigma_m = (s_max + s_min) / 2
 s_eq = sigma_a / (1 - (sigma_m / mat['uts'])) if sigma_m < mat['uts'] else 9999
@@ -143,6 +138,13 @@ else:
     Nf_val = 10 ** ((math.log10(s_eq) - log_a)/b)
     Nf, years = int(Nf_val), round(Nf_val / cycles_yr, 2)
 
+# --- MODIFICA RICHIESTA: Calcolo Performance Decay ---
+if isinstance(Nf, int) and Nf > 0:
+    danno_annuo = (cycles_yr / Nf_val) * 100
+    perf_decay = min(danno_annuo * 0.5, 100.0)
+else:
+    perf_decay = 0.0
+
 n_x = np.logspace(3, 8, 50)
 s_y = (10**log_a) * (n_x**b) if isinstance(Nf, int) and Nf > 0 else np.zeros_like(n_x)
 s_y = np.maximum(s_y, se_corr)
@@ -156,6 +158,11 @@ c1.metric("Stress Eq. (Goodman)", f"{int(s_eq)} MPa")
 c2.metric("Limite Fatica Corretto", f"{int(se_corr)} MPa")
 c3.metric("Fattore Amb. (kd*kw)", f"{kd*kw:.2f}")
 c4.metric("Vita Utile Stimata", f"{years} anni" if isinstance(years, (int, float)) else years)
+
+# --- MODIFICA RICHIESTA: Metrica integrata nell'UI esistente ---
+st.markdown("---")
+st.metric("Degrado Performance (Perdita Rigidità Stimata a 1 Anno)", f"-{perf_decay:.2f} %" if isinstance(Nf, int) and Nf > 0 else "0.00 %")
+st.markdown("---")
 
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=n_x, y=s_y, name="Curva Wöhler S-N", line=dict(color=GOLD_SN, width=3)))
@@ -180,7 +187,6 @@ def create_seaborn_temp_image():
     plt.savefig(tmp_file.name, format="png", bbox_inches="tight", dpi=300)
     plt.close()
     return tmp_file.name
-
 
 class TablePDF(FPDF):
     def header(self):
@@ -251,6 +257,8 @@ def generate_full_pdf():
     pdf.add_table_row("Limite Fatica Reale (Se)", f"{int(se_corr)}", "MPa")
     pdf.add_table_row("Stress Massimo Applicato", f"{s_max}", "MPa")
     pdf.add_table_row("Stress Teorico (Goodman)", f"{int(s_eq)}", "MPa")
+    # --- MODIFICA RICHIESTA: Inserimento PDF ---
+    pdf.add_table_row("Perdita Rigidità Stimata (1 anno)", f"-{perf_decay:.2f} %", "Decadimento")
     pdf.ln(5)
     
     # --- BOX CONCLUSIVO VITA ---
@@ -285,5 +293,3 @@ if st.button("📄 Genera & Scarica Report Oro"):
         st.success("Report generato!")
     except Exception as e:
         st.error(f"Errore Generazione PDF: {e}")
-
-
