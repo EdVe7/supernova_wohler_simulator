@@ -79,11 +79,10 @@ with st.sidebar:
     sport_target = st.text_input("Sport / Obiettivo", "Golf - Olimpiadi 2040")
 
     st.header("⚙️ Parametri Ambientali")
-    mat_name = st.selectbox("Seleziona Materiale", list(materials_db.keys()))
+    mat_name = st.selectbox("Seleziona Materiale Principale", list(materials_db.keys()))
     
     mat = materials_db[mat_name] 
 
-    # --- MODIFICA RICHIESTA: Limite slider a 50 ---
     temp_esercizio = st.slider("Temperatura Operativa (°C)", -20, 50, 25)
     umidita_relativa = st.slider("Umidità Relativa (%)", 0, 100, 0)
     
@@ -92,13 +91,34 @@ with st.sidebar:
     load = st.selectbox("Tipo Carico", ["Flessione (Impatto Corsa)", "Assiale (Carico Statico)", "Torsione (Cambio Direzione)"])
     rel = st.selectbox("Affidabilità Richiesta", ["50%", "90%", "99%", "99.99%"])
     
-    st.header("⚖️ Spettro di Carico")
+    # --- NUOVO INSERIMENTO: Coefficiente di Intaglio ---
+    st.header("📐 Geometria (Intaglio)")
+    forma_intaglio = st.selectbox("Geometria Sezione Critica", ["Superficie Liscia (Kf=1.0)", "Raccordo Ampio (Kf=1.2)", "Foro Passante (Kf=1.8)", "Spigolo Vivo (Kf=2.5)"])
+    kf_dict = {"Superficie Liscia (Kf=1.0)": 1.0, "Raccordo Ampio (Kf=1.2)": 1.2, "Foro Passante (Kf=1.8)": 1.8, "Spigolo Vivo (Kf=2.5)": 2.5}
+    kf = kf_dict[forma_intaglio]
+
+    st.header("⚖️ Spettro di Carico Primario")
     s_max = st.number_input("Stress Max (MPa)", value=400)
     s_min = st.number_input("Stress Min (MPa)", value=0)
     cycles_yr = st.number_input("Cicli Previsti / Anno", value=100000, step=10000)
 
+    # --- NUOVO INSERIMENTO: Danno Accumulato (Miner) ---
+    st.header("💥 Carico Secondario (Miner)")
+    usa_miner = st.checkbox("Aggiungi Impatti Rari / Picchi")
+    if usa_miner:
+        s_max_2 = st.number_input("Stress Max Sec. (MPa)", value=600)
+        s_min_2 = st.number_input("Stress Min Sec. (MPa)", value=0)
+        cycles_yr_2 = st.number_input("Cicli Sec. / Anno", value=1000, step=100)
+    else:
+        s_max_2, s_min_2, cycles_yr_2 = 0, 0, 0
+
+    # --- NUOVO INSERIMENTO: Confronto Materiali ---
+    st.header("🔄 Confronto (A/B Test)")
+    mat_comp_name = st.selectbox("Seleziona Materiale B (Opzionale)", ["Nessuno"] + list(materials_db.keys()))
+
+
 # ==========================================
-# 3. MOTORE FISICO (CALCOLI) - Integrazione k_d e k_w
+# 3. MOTORE FISICO (CALCOLI) 
 # ==========================================
 def get_k_factors(uts, surf_type, load_type, rel_type, mat_cat, temp, hum):
     surfs = {"Lucidato": (1.58, -0.085), "Lavorato": (4.51, -0.265), "Grezzo": (57.7, -0.718), "Forgiato": (272.0, -0.995)}
@@ -123,12 +143,14 @@ def get_k_factors(uts, surf_type, load_type, rel_type, mat_cat, temp, hum):
 ka, kc, ke, kd, kw = get_k_factors(mat['uts'], surf, load, rel, mat['cat'], temp_esercizio, umidita_relativa)
 se_corr = mat['se_base'] * ka * kc * ke * kd * kw
 
+# --- MODIFICA: Applicazione Kf allo Stress Equivalente ---
 sigma_a = (s_max - s_min) / 2
 sigma_m = (s_max + s_min) / 2
-s_eq = sigma_a / (1 - (sigma_m / mat['uts'])) if sigma_m < mat['uts'] else 9999
+s_eq = (sigma_a / (1 - (sigma_m / mat['uts'])) if sigma_m < mat['uts'] else 9999) * kf
 
-if s_eq <= se_corr: Nf, years = "Infinito", "Infinito"
-elif s_max >= mat['uts']: Nf, years = 0, 0
+# Logica di calcolo Cicli (Nf_val) per il Carico 1
+if s_eq <= se_corr: Nf_val = float('inf')
+elif s_max >= mat['uts']: Nf_val = 1e-5
 else:
     f = 0.9
     S1000 = f * mat['uts']
@@ -136,11 +158,37 @@ else:
     b = -(math.log10(S1000/se_corr)) / (math.log10(N_end)-3)
     log_a = math.log10(S1000) - 3*b
     Nf_val = 10 ** ((math.log10(s_eq) - log_a)/b)
-    Nf, years = int(Nf_val), round(Nf_val / cycles_yr, 2)
 
-# --- MODIFICA RICHIESTA: Calcolo Performance Decay ---
-if isinstance(Nf, int) and Nf > 0:
-    danno_annuo = (cycles_yr / Nf_val) * 100
+# --- NUOVO: Calcolo per Carico 2 (Miner) ---
+if usa_miner:
+    sigma_a_2 = (s_max_2 - s_min_2) / 2
+    sigma_m_2 = (s_max_2 + s_min_2) / 2
+    s_eq_2 = (sigma_a_2 / (1 - (sigma_m_2 / mat['uts'])) if sigma_m_2 < mat['uts'] else 9999) * kf
+    
+    if s_eq_2 <= se_corr: Nf_val_2 = float('inf')
+    elif s_max_2 >= mat['uts']: Nf_val_2 = 1e-5
+    else:
+        Nf_val_2 = 10 ** ((math.log10(s_eq_2) - log_a)/b)
+else:
+    Nf_val_2 = float('inf')
+    s_eq_2 = 0
+
+# --- NUOVO: Accumulo Danno Totale ---
+danno_1 = cycles_yr / Nf_val if Nf_val > 0 else float('inf')
+danno_2 = cycles_yr_2 / Nf_val_2 if Nf_val_2 > 0 else float('inf')
+danno_totale = danno_1 + danno_2
+
+if danno_totale >= 1 or s_max >= mat['uts'] or (usa_miner and s_max_2 >= mat['uts']):
+    years, Nf = 0, 0
+elif danno_totale == 0:
+    years, Nf = "Infinito", "Infinito"
+else:
+    years = round(1 / danno_totale, 2)
+    Nf = int(Nf_val) # Manteniamo Nf visibile per il grafico sul carico primario
+
+# Calcolo Performance Decay
+if isinstance(years, (int, float)) and years != 0:
+    danno_annuo = danno_totale * 100
     perf_decay = min(danno_annuo * 0.5, 100.0)
 else:
     perf_decay = 0.0
@@ -149,25 +197,50 @@ n_x = np.logspace(3, 8, 50)
 s_y = (10**log_a) * (n_x**b) if isinstance(Nf, int) and Nf > 0 else np.zeros_like(n_x)
 s_y = np.maximum(s_y, se_corr)
 
+# --- NUOVO: Calcolo Materiale B (Confronto) ---
+if mat_comp_name != "Nessuno":
+    mat2 = materials_db[mat_comp_name]
+    ka2, kc2, ke2, kd2, kw2 = get_k_factors(mat2['uts'], surf, load, rel, mat2['cat'], temp_esercizio, umidita_relativa)
+    se_corr2 = mat2['se_base'] * ka2 * kc2 * ke2 * kd2 * kw2
+    
+    f2 = 0.9
+    S1000_2 = f2 * mat2['uts']
+    N_end_2 = 1e6 if mat2['cat'] not in ["Alluminio", "Polimeri"] else 5e8
+    b2 = -(math.log10(S1000_2/se_corr2)) / (math.log10(N_end_2)-3)
+    log_a2 = math.log10(S1000_2) - 3*b2
+    
+    s_y_comp = (10**log_a2) * (n_x**b2)
+    s_y_comp = np.maximum(s_y_comp, se_corr2)
+
 # ==========================================
 # 4. VISUALIZZAZIONE UI (Colore OroSN)
 # ==========================================
 st.title("🦾 Analisi Strutturale Protesi")
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Stress Eq. (Goodman)", f"{int(s_eq)} MPa")
+c1.metric("Stress Eq. Principale", f"{int(s_eq)} MPa")
 c2.metric("Limite Fatica Corretto", f"{int(se_corr)} MPa")
 c3.metric("Fattore Amb. (kd*kw)", f"{kd*kw:.2f}")
 c4.metric("Vita Utile Stimata", f"{years} anni" if isinstance(years, (int, float)) else years)
 
-# --- MODIFICA RICHIESTA: Metrica integrata nell'UI esistente ---
 st.markdown("---")
 st.metric("Degrado Performance (Perdita Rigidità Stimata a 1 Anno)", f"-{perf_decay:.2f} %" if isinstance(Nf, int) and Nf > 0 else "0.00 %")
 st.markdown("---")
 
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=n_x, y=s_y, name="Curva Wöhler S-N", line=dict(color=GOLD_SN, width=3)))
+fig.add_trace(go.Scatter(x=n_x, y=s_y, name=f"Curva S-N ({mat_name})", line=dict(color=GOLD_SN, width=3)))
+
+# Aggiunta Punto Rottura Carico Principale
 if isinstance(Nf, int) and Nf > 0:
-    fig.add_trace(go.Scatter(x=[Nf], y=[s_eq], mode='markers', marker=dict(color='#FF4B4B', size=12), name="Rottura"))
+    fig.add_trace(go.Scatter(x=[Nf], y=[s_eq], mode='markers', marker=dict(color='#FF4B4B', size=12), name="Carico Primario"))
+
+# Aggiunta Punto Rottura Carico Secondario (Miner)
+if usa_miner and isinstance(Nf_val_2, float) and Nf_val_2 < float('inf'):
+    fig.add_trace(go.Scatter(x=[int(Nf_val_2)], y=[s_eq_2], mode='markers', marker=dict(color='#FFA500', size=10, symbol='x'), name="Carico Secondario"))
+
+# Aggiunta Curva di Confronto
+if mat_comp_name != "Nessuno":
+    fig.add_trace(go.Scatter(x=n_x, y=s_y_comp, name=f"Confronto: {mat_comp_name}", line=dict(color="#A0B0C0", width=2, dash='dash')))
+
 fig.update_layout(xaxis_type="log", title="Curva di Fatica (Wöhler) - Supernova Oro", height=400)
 st.plotly_chart(fig, use_container_width=True)
 
@@ -177,12 +250,21 @@ st.plotly_chart(fig, use_container_width=True)
 def create_seaborn_temp_image():
     plt.figure(figsize=(10, 5))
     sns.set_theme(style="whitegrid")
-    ax = sns.lineplot(x=n_x, y=s_y, color=GOLD_SN, linewidth=2.5)
+    ax = sns.lineplot(x=n_x, y=s_y, color=GOLD_SN, linewidth=2.5, label=mat_name)
     ax.set_xscale("log")
     plt.axhline(se_corr, color='green', linestyle='--')
+    
     if isinstance(Nf, int) and Nf > 0:
-        plt.scatter([Nf], [s_eq], color="#FF4B4B", zorder=5, s=150)
-    plt.title(f"Analisi S-N: {mat_name}", fontsize=14, fontweight='bold')
+        plt.scatter([Nf], [s_eq], color="#FF4B4B", zorder=5, s=150, label="Primario")
+        
+    if usa_miner and isinstance(Nf_val_2, float) and Nf_val_2 < float('inf'):
+        plt.scatter([int(Nf_val_2)], [s_eq_2], color="#FFA500", zorder=5, s=100, marker='X', label="Secondario")
+
+    if mat_comp_name != "Nessuno":
+        sns.lineplot(x=n_x, y=s_y_comp, color="#A0B0C0", linewidth=2.0, linestyle="--", label=mat_comp_name)
+
+    plt.title(f"Analisi Strutturale Combinata", fontsize=14, fontweight='bold')
+    plt.legend()
     tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     plt.savefig(tmp_file.name, format="png", bbox_inches="tight", dpi=300)
     plt.close()
@@ -237,17 +319,18 @@ def generate_full_pdf():
     pdf.add_table_row("Materiale Scelto", mat_name, mat['cat'])
     pdf.add_table_row("Carico Rottura Statico (UTS)", f"{mat['uts']}", "MPa")
     pdf.add_table_row("Limite Snervamento (Yield)", f"{mat['yield']}", "MPa")
-    pdf.add_table_row("Cicli Annuali Previsti", f"{cycles_yr:,}", "Cicli/y")
+    pdf.add_table_row("Cicli Annuali Previsti", f"{cycles_yr:,}", "Cicli Primari")
     pdf.ln(3)
 
-    # --- SEZIONE 2: FATIGUE MODIFIERS (CON TEMP E UMIDITA') ---
-    pdf.chapter_title("2. Condizioni Ambientali e di Carico (Marin)")
+    # --- SEZIONE 2: FATIGUE MODIFIERS ---
+    pdf.chapter_title("2. Condizioni Ambientali e di Carico")
     pdf.add_table_row("Fattore Correttivo", "Coefficiente", "Condizione Applicata", header=True)
     pdf.add_table_row("Finitura Superficiale (ka)", f"{ka:.3f}", surf)
     pdf.add_table_row("Vettore di Carico (kc)", f"{kc:.2f}", load)
     pdf.add_table_row("Sicurezza/Affidabilità (ke)", f"{ke:.3f}", rel)
     pdf.add_table_row("Fattore Termico (kd)", f"{kd:.3f}", f"{temp_esercizio} C")
     pdf.add_table_row("Fattore Umidità (kw)", f"{kw:.3f}", f"{umidita_relativa} %")
+    pdf.add_table_row("Fattore Intaglio (Kf)", f"{kf:.2f}", forma_intaglio) # Inserimento nel PDF
     pdf.ln(3)
 
     # --- SEZIONE 3: RISULTATI ---
@@ -255,9 +338,10 @@ def generate_full_pdf():
     pdf.add_table_row("Grandezza", "Valore", "Unità", header=True)
     pdf.add_table_row("Limite Fatica Ideale", f"{mat['se_base']}", "MPa")
     pdf.add_table_row("Limite Fatica Reale (Se)", f"{int(se_corr)}", "MPa")
-    pdf.add_table_row("Stress Massimo Applicato", f"{s_max}", "MPa")
-    pdf.add_table_row("Stress Teorico (Goodman)", f"{int(s_eq)}", "MPa")
-    # --- MODIFICA RICHIESTA: Inserimento PDF ---
+    pdf.add_table_row("Stress Teorico Primario", f"{int(s_eq)}", "MPa")
+    if usa_miner:
+        pdf.add_table_row("Stress Teorico Secondario", f"{int(s_eq_2)}", "MPa")
+        pdf.add_table_row("Danno Accumulato", f"{danno_totale*100:.2f} % / anno", "Regola di Miner")
     pdf.add_table_row("Perdita Rigidità Stimata (1 anno)", f"-{perf_decay:.2f} %", "Decadimento")
     pdf.ln(5)
     
@@ -265,10 +349,10 @@ def generate_full_pdf():
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(0, 8, "PREVISIONE VITA UTILE COMPONENTE:", 0, 1)
     if isinstance(years, (int, float)):
-        res_text = f"{Nf:,} Cicli di Esercizio  (Stima: {years} Anni)"
+        res_text = f"Stima Vita Sicura: {years} Anni"
         color = (0, 128, 0) if years > 5 else (200, 0, 0)
     else:
-        res_text = f"Resistenza Strutturale: {Nf}"
+        res_text = f"Resistenza Strutturale: {years}"
         color = (0, 0, 200)
 
     pdf.set_font('Arial', 'B', 13)
