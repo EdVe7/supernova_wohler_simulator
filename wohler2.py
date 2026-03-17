@@ -17,15 +17,17 @@ BG_DARK = "#0B1D22"
 
 st.set_page_config(page_title="Supernova Fatigue Lab", page_icon="🚀", layout="wide")
 
+# --- MODIFICA: Nascosta la barra degli strumenti (GitHub) in alto a dx ---
 st.markdown(f"""
     <style>
     #MainMenu {{visibility: hidden;}} footer {{visibility: hidden;}} header {{visibility: hidden;}}
     .stDeployButton {{display:none;}}
+    [data-testid="stToolbar"] {{visibility: hidden !important;}}
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# SPLASH SCREEN E LOGIN (Codice Originale Intatto)
+# SPLASH SCREEN E LOGIN 
 # ==========================================
 if 'splash_done' not in st.session_state:
     placeholder = st.empty()
@@ -35,7 +37,8 @@ if 'splash_done' not in st.session_state:
             st.image("logo.png", use_container_width=True)
         except:
             st.markdown(f"<h1 style='text-align:center; color:{GOLD_SN};'>SUPERNOVA</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align:center;'>Advanced Paralympic Prosthetics Lab</p>", unsafe_allow_html=True)
+        # --- MODIFICA: Scritta modificata in "data over talent" ---
+        st.markdown("<p style='text-align:center;'>data over talent</p>", unsafe_allow_html=True)
     time.sleep(3) 
     placeholder.empty()
     st.session_state['splash_done'] = True
@@ -57,15 +60,21 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ==========================================
-# 1. DATABASE MATERIALI (Codice Originale Intatto)
+# 1. DATABASE MATERIALI 
 # ==========================================
+# --- MODIFICA: Database espanso a 12 materiali ---
 materials_db = {
     "Titanio Ti-6Al-4V (Piloni/Giunti)": {"uts": 950, "yield": 880, "se_base": 510, "cat": "Metalli"},
     "Titanio Grado 5 ELI (Impianti)": {"uts": 860, "yield": 795, "se_base": 440, "cat": "Metalli"},
+    "Titanio Trabecolare DMLS (Retico)": {"uts": 750, "yield": 680, "se_base": 300, "cat": "Metalli"},
+    "Nitinol (Lega Memoria di Forma)": {"uts": 1000, "yield": 400, "se_base": 350, "cat": "Metalli"},
     "Fibra Carbonio UD (Lame Corsa)": {"uts": 1500, "yield": 1500, "se_base": 900, "cat": "Compositi"},
+    "Matrice Epossidica al Grafene": {"uts": 1700, "yield": 1650, "se_base": 1100, "cat": "Compositi"},
+    "Fibra di Vetro S-Glass/Epoxy": {"uts": 1100, "yield": 1000, "se_base": 400, "cat": "Compositi"},
     "Kevlar/Epoxy (Socket Strutturale)": {"uts": 1300, "yield": 1200, "se_base": 750, "cat": "Compositi"},
     "Alluminio 7075-T6 (Ergal - Raccordi)": {"uts": 572, "yield": 503, "se_base": 159, "cat": "Metalli"},
     "PEEK (Componenti Flessibili/Socket)": {"uts": 100, "yield": 100, "se_base": 45, "cat": "Polimeri"},
+    "UHMWPE (Polietilene Alta Densità)": {"uts": 40, "yield": 25, "se_base": 15, "cat": "Polimeri"},
     "Acciaio Inox 316L (Viteria/Giunti)": {"uts": 485, "yield": 170, "se_base": 290, "cat": "Metalli"}
 }
 
@@ -99,7 +108,8 @@ with st.sidebar:
 
     st.header("⚖️ Spettro di Carico Primario")
     s_max = st.number_input("Stress Max (MPa)", value=400)
-    s_min = st.number_input("Stress Min (MPa)", value=0)
+    # --- MODIFICA: Stress min a 1 MPa di default e come valore minimo ---
+    s_min = st.number_input("Stress Min (MPa)", value=1, min_value=1)
     cycles_yr = st.number_input("Cicli Previsti / Anno", value=100000, step=10000)
 
     # --- NUOVO INSERIMENTO: Danno Accumulato (Miner) ---
@@ -107,7 +117,8 @@ with st.sidebar:
     usa_miner = st.checkbox("Aggiungi Impatti Rari / Picchi")
     if usa_miner:
         s_max_2 = st.number_input("Stress Max Sec. (MPa)", value=600)
-        s_min_2 = st.number_input("Stress Min Sec. (MPa)", value=0)
+        # --- MODIFICA: Stress min a 1 MPa di default e come valore minimo ---
+        s_min_2 = st.number_input("Stress Min Sec. (MPa)", value=1, min_value=1)
         cycles_yr_2 = st.number_input("Cicli Sec. / Anno", value=1000, step=100)
     else:
         s_max_2, s_min_2, cycles_yr_2 = 0, 0, 0
@@ -143,6 +154,13 @@ def get_k_factors(uts, surf_type, load_type, rel_type, mat_cat, temp, hum):
 ka, kc, ke, kd, kw = get_k_factors(mat['uts'], surf, load, rel, mat['cat'], temp_esercizio, umidita_relativa)
 se_corr = mat['se_base'] * ka * kc * ke * kd * kw
 
+# --- MODIFICA: Spostamento log_a e b FUORI dall'if/else per prevenire il NameError ---
+f = 0.9
+S1000 = f * mat['uts']
+N_end = 1e6 if mat['cat'] not in ["Alluminio", "Polimeri"] else 5e8
+b = -(math.log10(S1000/se_corr)) / (math.log10(N_end)-3)
+log_a = math.log10(S1000) - 3*b
+
 # --- MODIFICA: Applicazione Kf allo Stress Equivalente ---
 sigma_a = (s_max - s_min) / 2
 sigma_m = (s_max + s_min) / 2
@@ -152,11 +170,6 @@ s_eq = (sigma_a / (1 - (sigma_m / mat['uts'])) if sigma_m < mat['uts'] else 9999
 if s_eq <= se_corr: Nf_val = float('inf')
 elif s_max >= mat['uts']: Nf_val = 1e-5
 else:
-    f = 0.9
-    S1000 = f * mat['uts']
-    N_end = 1e6 if mat['cat'] not in ["Alluminio", "Polimeri"] else 5e8
-    b = -(math.log10(S1000/se_corr)) / (math.log10(N_end)-3)
-    log_a = math.log10(S1000) - 3*b
     Nf_val = 10 ** ((math.log10(s_eq) - log_a)/b)
 
 # --- NUOVO: Calcolo per Carico 2 (Miner) ---
