@@ -37,8 +37,8 @@ if 'splash_done' not in st.session_state:
             st.image("logo.png", use_container_width=True)
         except:
             st.markdown(f"<h1 style='text-align:center; color:{GOLD_SN};'>SUPERNOVA</h1>", unsafe_allow_html=True)
-        # --- MODIFICA: Scritta modificata in "data over talent" ---
-        st.markdown("<p style='text-align:center;'>data over talent</p>", unsafe_allow_html=True)
+        # --- MODIFICA: Scritta modificata in "DATA OVER TALENT" in maiuscolo e più grande ---
+        st.markdown("<h2 style='text-align:center; font-weight: 900; font-size: 2.5em; letter-spacing: 2px;'>DATA OVER TALENT</h2>", unsafe_allow_html=True)
     time.sleep(3) 
     placeholder.empty()
     st.session_state['splash_done'] = True
@@ -95,35 +95,47 @@ with st.sidebar:
     temp_esercizio = st.slider("Temperatura Operativa (°C)", -20, 50, 25)
     umidita_relativa = st.slider("Umidità Relativa (%)", 0, 100, 0)
     
+    # --- NUOVO INSERIMENTO: Microclima Socket (Implementazione 4) ---
+    st.header("🌡️ Microclima Socket")
+    usa_microclima = st.checkbox("Accumulo Calore (Cicli Continui)")
+    ore_continue = st.slider("Ore Sessione Continuous", 1, 10, 4) if usa_microclima else 0
+
     st.header("📉 Fattori Marin")
     surf = st.selectbox("Finitura Superficiale", ["Lucidato", "Lavorato", "Grezzo", "Forgiato"])
-    load = st.selectbox("Tipo Carico", ["Flessione (Impatto Corsa)", "Assiale (Carico Statico)", "Torsione (Cambio Direzione)"])
+    
+    # --- NUOVO INSERIMENTO: Golf Swing Multi-assiale (Implementazione 1) ---
+    load = st.selectbox("Tipo Carico", ["Flessione (Impatto Corsa)", "Assiale (Carico Statico)", "Torsione (Cambio Direzione)", "Golf Swing (Multi-assiale)"])
     rel = st.selectbox("Affidabilità Richiesta", ["50%", "90%", "99%", "99.99%"])
     
-    # --- NUOVO INSERIMENTO: Coefficiente di Intaglio ---
     st.header("📐 Geometria (Intaglio)")
     forma_intaglio = st.selectbox("Geometria Sezione Critica", ["Superficie Liscia (Kf=1.0)", "Raccordo Ampio (Kf=1.2)", "Foro Passante (Kf=1.8)", "Spigolo Vivo (Kf=2.5)"])
     kf_dict = {"Superficie Liscia (Kf=1.0)": 1.0, "Raccordo Ampio (Kf=1.2)": 1.2, "Foro Passante (Kf=1.8)": 1.8, "Spigolo Vivo (Kf=2.5)": 2.5}
     kf = kf_dict[forma_intaglio]
 
     st.header("⚖️ Spettro di Carico Primario")
-    s_max = st.number_input("Stress Max (MPa)", value=400)
-    # --- MODIFICA: Stress min a 1 MPa di default e come valore minimo ---
+    
+    # --- NUOVO INSERIMENTO: Logica Von Mises per Golf Swing ---
+    if load == "Golf Swing (Multi-assiale)":
+        sigma_ass = st.number_input("Stress Assiale (MPa)", value=200)
+        tau_tors = st.number_input("Stress Taglio/Torsione (MPa)", value=150)
+        s_max_eq = math.sqrt(sigma_ass**2 + 3 * (tau_tors**2))
+        st.info(f"Equivalente Von Mises: {s_max_eq:.1f} MPa")
+        s_max = st.number_input("Stress Max Eq. (MPa)", value=float(s_max_eq))
+    else:
+        s_max = st.number_input("Stress Max (MPa)", value=400)
+        
     s_min = st.number_input("Stress Min (MPa)", value=1, min_value=1)
     cycles_yr = st.number_input("Cicli Previsti / Anno", value=100000, step=10000)
 
-    # --- NUOVO INSERIMENTO: Danno Accumulato (Miner) ---
     st.header("💥 Carico Secondario (Miner)")
     usa_miner = st.checkbox("Aggiungi Impatti Rari / Picchi")
     if usa_miner:
         s_max_2 = st.number_input("Stress Max Sec. (MPa)", value=600)
-        # --- MODIFICA: Stress min a 1 MPa di default e come valore minimo ---
         s_min_2 = st.number_input("Stress Min Sec. (MPa)", value=1, min_value=1)
         cycles_yr_2 = st.number_input("Cicli Sec. / Anno", value=1000, step=100)
     else:
         s_max_2, s_min_2, cycles_yr_2 = 0, 0, 0
 
-    # --- NUOVO INSERIMENTO: Confronto Materiali ---
     st.header("🔄 Confronto (A/B Test)")
     mat_comp_name = st.selectbox("Seleziona Materiale B (Opzionale)", ["Nessuno"] + list(materials_db.keys()))
 
@@ -135,7 +147,8 @@ def get_k_factors(uts, surf_type, load_type, rel_type, mat_cat, temp, hum):
     surfs = {"Lucidato": (1.58, -0.085), "Lavorato": (4.51, -0.265), "Grezzo": (57.7, -0.718), "Forgiato": (272.0, -0.995)}
     ka = 0.9 if mat_cat in ["Compositi", "Polimeri"] else min(surfs[surf_type][0] * (uts ** surfs[surf_type][1]), 1.0)
     
-    loads = {"Flessione (Impatto Corsa)": 1.0, "Assiale (Carico Statico)": 0.85, "Torsione (Cambio Direzione)": 0.59}
+    # --- MODIFICA: Aggiunto Golf Swing nei K factors ---
+    loads = {"Flessione (Impatto Corsa)": 1.0, "Assiale (Carico Statico)": 0.85, "Torsione (Cambio Direzione)": 0.59, "Golf Swing (Multi-assiale)": 0.70}
     kc = loads.get(load_type, 1.0)
     
     rels = {"50%": 1.0, "90%": 0.897, "99%": 0.814, "99.99%": 0.702}
@@ -152,16 +165,19 @@ def get_k_factors(uts, surf_type, load_type, rel_type, mat_cat, temp, hum):
     return ka, kc, ke, kd, kw
 
 ka, kc, ke, kd, kw = get_k_factors(mat['uts'], surf, load, rel, mat['cat'], temp_esercizio, umidita_relativa)
+
+# --- NUOVO INSERIMENTO: Applicazione Microclima ---
+if usa_microclima and mat['cat'] in ["Polimeri", "Compositi"]:
+    kd = kd * (1.0 - (0.02 * ore_continue))
+
 se_corr = mat['se_base'] * ka * kc * ke * kd * kw
 
-# --- MODIFICA: Spostamento log_a e b FUORI dall'if/else per prevenire il NameError ---
 f = 0.9
 S1000 = f * mat['uts']
 N_end = 1e6 if mat['cat'] not in ["Alluminio", "Polimeri"] else 5e8
 b = -(math.log10(S1000/se_corr)) / (math.log10(N_end)-3)
 log_a = math.log10(S1000) - 3*b
 
-# --- MODIFICA: Applicazione Kf allo Stress Equivalente ---
 sigma_a = (s_max - s_min) / 2
 sigma_m = (s_max + s_min) / 2
 s_eq = (sigma_a / (1 - (sigma_m / mat['uts'])) if sigma_m < mat['uts'] else 9999) * kf
@@ -172,7 +188,6 @@ elif s_max >= mat['uts']: Nf_val = 1e-5
 else:
     Nf_val = 10 ** ((math.log10(s_eq) - log_a)/b)
 
-# --- NUOVO: Calcolo per Carico 2 (Miner) ---
 if usa_miner:
     sigma_a_2 = (s_max_2 - s_min_2) / 2
     sigma_m_2 = (s_max_2 + s_min_2) / 2
@@ -186,7 +201,6 @@ else:
     Nf_val_2 = float('inf')
     s_eq_2 = 0
 
-# --- NUOVO: Accumulo Danno Totale ---
 danno_1 = cycles_yr / Nf_val if Nf_val > 0 else float('inf')
 danno_2 = cycles_yr_2 / Nf_val_2 if Nf_val_2 > 0 else float('inf')
 danno_totale = danno_1 + danno_2
@@ -197,9 +211,8 @@ elif danno_totale == 0:
     years, Nf = "Infinito", "Infinito"
 else:
     years = round(1 / danno_totale, 2)
-    Nf = int(Nf_val) # Manteniamo Nf visibile per il grafico sul carico primario
+    Nf = int(Nf_val) 
 
-# Calcolo Performance Decay
 if isinstance(years, (int, float)) and years != 0:
     danno_annuo = danno_totale * 100
     perf_decay = min(danno_annuo * 0.5, 100.0)
@@ -210,10 +223,11 @@ n_x = np.logspace(3, 8, 50)
 s_y = (10**log_a) * (n_x**b) if isinstance(Nf, int) and Nf > 0 else np.zeros_like(n_x)
 s_y = np.maximum(s_y, se_corr)
 
-# --- NUOVO: Calcolo Materiale B (Confronto) ---
 if mat_comp_name != "Nessuno":
     mat2 = materials_db[mat_comp_name]
     ka2, kc2, ke2, kd2, kw2 = get_k_factors(mat2['uts'], surf, load, rel, mat2['cat'], temp_esercizio, umidita_relativa)
+    if usa_microclima and mat2['cat'] in ["Polimeri", "Compositi"]:
+        kd2 = kd2 * (1.0 - (0.02 * ore_continue))
     se_corr2 = mat2['se_base'] * ka2 * kc2 * ke2 * kd2 * kw2
     
     f2 = 0.9
@@ -242,20 +256,49 @@ st.markdown("---")
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=n_x, y=s_y, name=f"Curva S-N ({mat_name})", line=dict(color=GOLD_SN, width=3)))
 
-# Aggiunta Punto Rottura Carico Principale
 if isinstance(Nf, int) and Nf > 0:
     fig.add_trace(go.Scatter(x=[Nf], y=[s_eq], mode='markers', marker=dict(color='#FF4B4B', size=12), name="Carico Primario"))
 
-# Aggiunta Punto Rottura Carico Secondario (Miner)
 if usa_miner and isinstance(Nf_val_2, float) and Nf_val_2 < float('inf'):
     fig.add_trace(go.Scatter(x=[int(Nf_val_2)], y=[s_eq_2], mode='markers', marker=dict(color='#FFA500', size=10, symbol='x'), name="Carico Secondario"))
 
-# Aggiunta Curva di Confronto
 if mat_comp_name != "Nessuno":
     fig.add_trace(go.Scatter(x=n_x, y=s_y_comp, name=f"Confronto: {mat_comp_name}", line=dict(color="#A0B0C0", width=2, dash='dash')))
 
 fig.update_layout(xaxis_type="log", title="Curva di Fatica (Wöhler) - Supernova Oro", height=400)
 st.plotly_chart(fig, use_container_width=True)
+
+# --- NUOVO INSERIMENTO: Sezione Ottimizzazione e Hysteresis (Implementazioni 2 e 3) ---
+st.markdown("---")
+st.subheader("🛠️ Modulo Avanzato: Topologia & Decadimento Hysteresis")
+c_opt1, c_opt2 = st.columns(2)
+
+with c_opt1:
+    st.markdown("**1. Ottimizzazione Topologica (Solver Peso/Vita)**")
+    target_anni = st.number_input("Vita Agonistica Target (Anni)", value=4.0, min_value=0.5, step=0.5)
+    target_cicli = target_anni * (cycles_yr + cycles_yr_2)
+    
+    if target_cicli >= N_end: s_target = se_corr
+    else: s_target = 10 ** (log_a + b * math.log10(target_cicli))
+    
+    st.info(f"Per garantire {target_anni} anni, lo Stress Equivalente Max non deve superare: **{s_target:.1f} MPa**")
+    
+    if s_eq < s_target and s_eq > 0:
+        st.success(f"📉 Puoi RIDURRE il peso! La sezione è sovradimensionata del {((s_target/s_eq)-1)*100:.1f}% rispetto al target scelto.")
+    elif s_eq > s_target:
+        st.error(f"⚠️ Rischio Rottura! Aumenta la sezione (aggiungi peso) del {(1-(s_target/s_eq))*100:.1f}% o passa a un materiale superiore.")
+        
+with c_opt2:
+    st.markdown("**2. Hysteresis (Decadimento Rigidità Stimata)**")
+    fig_stiff = go.Figure()
+    
+    # Calcolo di decadimento logaritmico basato su perf_decay limitato
+    stiffness = 100 - (perf_decay * (np.log10(n_x) / 6)) 
+    stiffness = np.clip(stiffness, 0, 100)
+    
+    fig_stiff.add_trace(go.Scatter(x=n_x, y=stiffness, fill='tozeroy', name="Modulo Elastico (%)", line=dict(color="#00FF00" if perf_decay < 10 else "#FF4B4B")))
+    fig_stiff.update_layout(xaxis_type="log", height=250, margin=dict(l=0,r=0,t=30,b=0), title="Stiffness Retention % (Modulo Elastico)")
+    st.plotly_chart(fig_stiff, use_container_width=True)
 
 # ==========================================
 # 5. GENERATORE PDF (Aggiornato con Oro e Parametri)
@@ -343,7 +386,10 @@ def generate_full_pdf():
     pdf.add_table_row("Sicurezza/Affidabilità (ke)", f"{ke:.3f}", rel)
     pdf.add_table_row("Fattore Termico (kd)", f"{kd:.3f}", f"{temp_esercizio} C")
     pdf.add_table_row("Fattore Umidità (kw)", f"{kw:.3f}", f"{umidita_relativa} %")
-    pdf.add_table_row("Fattore Intaglio (Kf)", f"{kf:.2f}", forma_intaglio) # Inserimento nel PDF
+    pdf.add_table_row("Fattore Intaglio (Kf)", f"{kf:.2f}", forma_intaglio) 
+    # --- MODIFICA PDF: Aggiunta Microclima in tabella ---
+    if usa_microclima and mat['cat'] in ["Polimeri", "Compositi"]:
+        pdf.add_table_row("Fattore Microclima", "Attivo", f"{ore_continue} ore continue")
     pdf.ln(3)
 
     # --- SEZIONE 3: RISULTATI ---
