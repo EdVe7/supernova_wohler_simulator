@@ -48,6 +48,8 @@ if "authenticated" not in st.session_state:
 
 if not st.session_state["authenticated"]:
     st.markdown("<h3 style='text-align:center;'>🔒 Accesso Riservato Lab</h3>", unsafe_allow_html=True)
+    # --- MODIFICA: Frase di benvenuto aggiunta ---
+    st.markdown("<p style='text-align:center; color:#A0B0C0; margin-bottom: 20px;'>Benvenuto nel centro di calibrazione avanzata. Inserisci le tue credenziali per iniziare l'ottimizzazione del setup.</p>", unsafe_allow_html=True)
     col_a, col_b, col_c = st.columns([1,2,1])
     with col_b:
         pwd = st.text_input("Inserisci la Password", type="password")
@@ -308,7 +310,8 @@ def create_seaborn_temp_image():
     sns.set_theme(style="whitegrid")
     ax = sns.lineplot(x=n_x, y=s_y, color=GOLD_SN, linewidth=2.5, label=mat_name)
     ax.set_xscale("log")
-    plt.axhline(se_corr, color='green', linestyle='--')
+    # --- MODIFICA: Colore verde sostituito con Oro Pastello ---
+    plt.axhline(se_corr, color='#EEDC82', linestyle='--')
     
     if isinstance(Nf, int) and Nf > 0:
         plt.scatter([Nf], [s_eq], color="#FF4B4B", zorder=5, s=150, label="Primario")
@@ -422,9 +425,29 @@ def generate_full_pdf():
 
     # --- SEZIONE 4: GRAFICO WOHLER ---
     pdf.chapter_title("4. Mappa Decadimento Strutturale (Curva S-N)")
+    current_y = pdf.get_y()
     img_path = create_seaborn_temp_image()
     pdf.image(img_path, x=10, w=190)
     os.remove(img_path)
+    
+    # --- MODIFICA: Inserimento testo personalizzato a fondo pagina ---
+    pdf.set_y(current_y + 105) # Sposta il cursore sotto l'immagine generata
+    pdf.ln(5)
+    
+    if isinstance(years, (int, float)) and years >= 4:
+        stato_protesi = "si trova in un range di sicurezza strutturale eccellente"
+    elif isinstance(years, (int, float)) and years > 0:
+        stato_protesi = "mostra segni di affaticamento che necessiteranno di monitoraggio"
+    else:
+        stato_protesi = "presenta criticità strutturali che richiedono un upgrade immediato"
+        
+    pdf.set_font('Arial', 'I', 11)
+    pdf.set_text_color(60, 60, 60)
+    messaggio_atleta = (f"Nota per {atleta_nome}: L'attuale configurazione in {mat_name} {stato_protesi}. "
+                        "Ogni millimetro e ogni megapascal della tua protesi sono stati testati per assicurarti stabilità e potenza in ogni movimento. "
+                        "La preparazione per il green delle Olimpiadi 2040 richiede un trasferimento di forza chirurgico e senza dispersioni: monitoreremo questo decadimento per far sì che lo swing rimanga fluido fino all'ultima buca.")
+    
+    pdf.multi_cell(0, 6, messaggio_atleta)
     
     return pdf.output(dest='S').encode('latin-1')
 
