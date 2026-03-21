@@ -87,7 +87,8 @@ with st.sidebar:
     st.header("🏃 Dati Atleta e Setup")
     atleta_nome = st.text_input("Nome Atleta", "Atleta Paralimpico")
     atleta_peso = st.number_input("Peso Atleta (kg)", value=75)
-    sport_target = st.text_input("Sport / Obiettivo", "Golf - Olimpiadi 2040")
+    # RIMOSSO Riferimento Olimpiadi 2040
+    sport_target = st.text_input("Sport / Obiettivo", "Competizione Agonistica")
 
     st.header("⚙️ Parametri Ambientali")
     mat_name = st.selectbox("Seleziona Materiale Principale", list(materials_db.keys()))
@@ -298,7 +299,8 @@ with c_opt2:
     stiffness = 100 - (perf_decay * (np.log10(n_x) / 6)) 
     stiffness = np.clip(stiffness, 0, 100)
     
-    fig_stiff.add_trace(go.Scatter(x=n_x, y=stiffness, fill='tozeroy', name="Modulo Elastico (%)", line=dict(color="#00FF00" if perf_decay < 10 else "#FF4B4B")))
+    # SOSTITUITO VERDE ACCESO CON ORO PASTELLO #EEDC82
+    fig_stiff.add_trace(go.Scatter(x=n_x, y=stiffness, fill='tozeroy', name="Modulo Elastico (%)", line=dict(color="#EEDC82" if perf_decay < 10 else "#FF4B4B")))
     fig_stiff.update_layout(xaxis_type="log", height=250, margin=dict(l=0,r=0,t=30,b=0), title="Stiffness Retention % (Modulo Elastico)")
     st.plotly_chart(fig_stiff, use_container_width=True)
 
@@ -310,7 +312,6 @@ def create_seaborn_temp_image():
     sns.set_theme(style="whitegrid")
     ax = sns.lineplot(x=n_x, y=s_y, color=GOLD_SN, linewidth=2.5, label=mat_name)
     ax.set_xscale("log")
-    # --- MODIFICA: Colore verde sostituito con Oro Pastello ---
     plt.axhline(se_corr, color='#EEDC82', linestyle='--')
     
     if isinstance(Nf, int) and Nf > 0:
@@ -324,6 +325,28 @@ def create_seaborn_temp_image():
 
     plt.title(f"Analisi Strutturale Combinata", fontsize=14, fontweight='bold')
     plt.legend()
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    plt.savefig(tmp_file.name, format="png", bbox_inches="tight", dpi=300)
+    plt.close()
+    return tmp_file.name
+
+# AGGIUNTO GRAFICO HYSTERESIS PER PDF
+def create_hysteresis_temp_image():
+    plt.figure(figsize=(10, 4))
+    sns.set_theme(style="whitegrid")
+    stiffness_arr = 100 - (perf_decay * (np.log10(n_x) / 6))
+    stiffness_arr = np.clip(stiffness_arr, 0, 100)
+    
+    color_fill = "#EEDC82" if perf_decay < 10 else "#FF4B4B"
+    plt.fill_between(n_x, stiffness_arr, color=color_fill, alpha=0.5)
+    plt.plot(n_x, stiffness_arr, color=color_fill, linewidth=2.5)
+    
+    plt.xscale("log")
+    plt.ylim(0, 105)
+    plt.title("Stiffness Retention % (Modulo Elastico)", fontsize=14, fontweight='bold')
+    plt.xlabel("Cicli")
+    plt.ylabel("Rigidità (%)")
+    
     tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     plt.savefig(tmp_file.name, format="png", bbox_inches="tight", dpi=300)
     plt.close()
@@ -425,14 +448,33 @@ def generate_full_pdf():
 
     # --- SEZIONE 4: GRAFICO WOHLER ---
     pdf.chapter_title("4. Mappa Decadimento Strutturale (Curva S-N)")
-    current_y = pdf.get_y()
     img_path = create_seaborn_temp_image()
     pdf.image(img_path, x=10, w=190)
     os.remove(img_path)
     
-    # --- MODIFICA: Inserimento testo personalizzato a fondo pagina ---
-    pdf.set_y(current_y + 105) # Sposta il cursore sotto l'immagine generata
+    pdf.add_page() # NUOVA PAGINA PER EVITARE ACCAVALLAMENTI
+    
+    # --- SEZIONE 5: OTTIMIZZAZIONE E HYSTERESIS (Aggiunta al PDF) ---
+    pdf.chapter_title("5. Ottimizzazione Topologica & Hysteresis")
+    pdf.set_font('Arial', '', 11)
+    pdf.cell(0, 6, f"Vita Agonistica Target: {target_anni} Anni", 0, 1)
+    pdf.cell(0, 6, f"Stress Equivalente Max consentito: {s_target:.1f} MPa", 0, 1)
+    
+    if s_eq < s_target and s_eq > 0:
+        msg_opt = f"Esito: Puoi RIDURRE il peso. La sezione e' sovradimensionata del {((s_target/s_eq)-1)*100:.1f}% rispetto al target scelto."
+    elif s_eq > s_target:
+        msg_opt = f"Allerta: Rischio Rottura. Aumentare la sezione (aggiungi peso) del {(1-(s_target/s_eq))*100:.1f}% o passare a un materiale superiore."
+    else:
+        msg_opt = "La sezione è perfettamente ottimizzata per il target."
+        
+    pdf.multi_cell(0, 6, msg_opt)
     pdf.ln(5)
+    
+    img_path_2 = create_hysteresis_temp_image()
+    pdf.image(img_path_2, x=10, w=190)
+    os.remove(img_path_2)
+
+    pdf.ln(10)
     
     if isinstance(years, (int, float)) and years >= 4:
         stato_protesi = "si trova in un range di sicurezza strutturale eccellente"
@@ -443,16 +485,19 @@ def generate_full_pdf():
         
     pdf.set_font('Arial', 'I', 11)
     pdf.set_text_color(60, 60, 60)
+    # RIMOSSO Riferimento Olimpiadi 2040 e reso generico per gli utenti
     messaggio_atleta = (f"Nota per {atleta_nome}: L'attuale configurazione in {mat_name} {stato_protesi}. "
                         "Ogni millimetro e ogni megapascal della tua protesi sono stati testati per assicurarti stabilità e potenza in ogni movimento. "
-                        "La preparazione per il green delle Olimpiadi 2040 richiede un trasferimento di forza chirurgico e senza dispersioni: monitoreremo questo decadimento per far sì che lo swing rimanga fluido fino all'ultima buca.")
+                        "La preparazione per i tuoi obiettivi sportivi richiede un trasferimento di forza chirurgico e senza dispersioni: "
+                        "monitoreremo questo decadimento per far sì che il gesto atletico rimanga fluido e costante fino alla fine.")
     
     pdf.multi_cell(0, 6, messaggio_atleta)
     
     return pdf.output(dest='S').encode('latin-1')
 
 st.markdown("---")
-if st.button("📄 Genera & Scarica Report Oro"):
+# RINOMINATO BOTTONE
+if st.button("📄 Genera Wohler Sim Report"):
     try:
         pdf_bytes = generate_full_pdf()
         st.download_button(label="Download Report PDF", data=pdf_bytes, file_name=f"Supernova_Report_{atleta_nome}.pdf", mime="application/pdf")
