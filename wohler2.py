@@ -10,6 +10,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import tempfile
 import os
+import pandas as pd # <-- NUOVO: Aggiunto per gestione CSV
 
 # COLORI BRAND SUPERNOVA
 GOLD_SN = "#D4AF37" 
@@ -85,53 +86,74 @@ materials_db = {
 # ==========================================
 with st.sidebar:
     st.header("🏃 Dati Atleta e Setup")
-    atleta_nome = st.text_input("Nome Atleta", "Atleta Paralimpico")
-    atleta_peso = st.number_input("Peso Atleta (kg)", value=75)
-    # RIMOSSO Riferimento Olimpiadi 2040
+    atleta_nome = st.text_input("Nome Atleta", "Atleta Paralimpico", help="Nome dell'atleta per la generazione del report.")
+    atleta_peso = st.number_input("Peso Atleta (kg)", value=75, help="Massa corporea (utile come riferimento per stimare gli stress se non noti).")
     sport_target = st.text_input("Sport / Obiettivo", "Competizione Agonistica")
 
+    # --- NUOVO INSERIMENTO: Profili Sportivi (Presets) ---
+    st.header("🎯 Profili Sportivi Rapidi")
+    presets = {
+        "Manuale (Nessun Preset)": None,
+        "Maratona (Basso Impatto, Alta Freq.)": {"load": "Flessione (Impatto Corsa)", "s_max": 150, "cycles": 1500000},
+        "Sprint 100m (Alto Impatto, Bassa Freq.)": {"load": "Flessione (Impatto Corsa)", "s_max": 450, "cycles": 5000},
+        "Golf Swing (Multi-assiale)": {"load": "Golf Swing (Multi-assiale)", "s_max": 250, "cycles": 15000, "sigma_ass": 180, "tau_tors": 120}
+    }
+    preset_choice = st.selectbox("Carica Configurazione", list(presets.keys()), help="Seleziona uno scenario per precompilare i campi di carico in automatico.")
+    p_data = presets[preset_choice]
+
     st.header("⚙️ Parametri Ambientali")
-    mat_name = st.selectbox("Seleziona Materiale Principale", list(materials_db.keys()))
+    mat_name = st.selectbox("Seleziona Materiale Principale", list(materials_db.keys()), help="La lega o il composito che costituisce la sezione critica in analisi.")
     
     mat = materials_db[mat_name] 
 
-    temp_esercizio = st.slider("Temperatura Operativa (°C)", -20, 50, 25)
-    umidita_relativa = st.slider("Umidità Relativa (%)", 0, 100, 0)
+    temp_esercizio = st.slider("Temperatura Operativa (°C)", -20, 50, 25, help="Temperature estreme declassano le performance dei polimeri e dei compositi (Fattore Kd).")
+    umidita_relativa = st.slider("Umidità Relativa (%)", 0, 100, 0, help="L'umidità accelera il degrado della matrice nei compositi (Fattore Kw).")
     
-    # --- NUOVO INSERIMENTO: Microclima Socket (Implementazione 4) ---
     st.header("🌡️ Microclima Socket")
-    usa_microclima = st.checkbox("Accumulo Calore (Cicli Continui)")
+    usa_microclima = st.checkbox("Accumulo Calore (Cicli Continui)", help="Attiva se l'atleta svolge sessioni lunghe senza togliere la protesi.")
     ore_continue = st.slider("Ore Sessione Continuous", 1, 10, 4) if usa_microclima else 0
 
     st.header("📉 Fattori Marin")
-    surf = st.selectbox("Finitura Superficiale", ["Lucidato", "Lavorato", "Grezzo", "Forgiato"])
+    surf = st.selectbox("Finitura Superficiale", ["Lucidato", "Lavorato", "Grezzo", "Forgiato"], help="Maggiore è la rugosità, maggiore è la probabilità di innesco cricche (Fattore Ka).")
     
-    # --- NUOVO INSERIMENTO: Golf Swing Multi-assiale (Implementazione 1) ---
-    load = st.selectbox("Tipo Carico", ["Flessione (Impatto Corsa)", "Assiale (Carico Statico)", "Torsione (Cambio Direzione)", "Golf Swing (Multi-assiale)"])
-    rel = st.selectbox("Affidabilità Richiesta", ["50%", "90%", "99%", "99.99%"])
+    # Integrazione Preset per Tipo Carico
+    load_options = ["Flessione (Impatto Corsa)", "Assiale (Carico Statico)", "Torsione (Cambio Direzione)", "Golf Swing (Multi-assiale)"]
+    def_load_idx = load_options.index(p_data["load"]) if p_data else 0
+    load = st.selectbox("Tipo Carico", load_options, index=def_load_idx, help="Un carico flessionale puro è meno gravoso di uno assiale o torsionale puro (Fattore Kc).")
+    
+    rel = st.selectbox("Affidabilità Richiesta", ["50%", "90%", "99%", "99.99%"], index=2, help="L'affidabilità statistica richiesta al componente. 99% è lo standard biomedicale (Fattore Ke).")
     
     st.header("📐 Geometria (Intaglio)")
-    forma_intaglio = st.selectbox("Geometria Sezione Critica", ["Superficie Liscia (Kf=1.0)", "Raccordo Ampio (Kf=1.2)", "Foro Passante (Kf=1.8)", "Spigolo Vivo (Kf=2.5)"])
+    forma_intaglio = st.selectbox("Geometria Sezione Critica", ["Superficie Liscia (Kf=1.0)", "Raccordo Ampio (Kf=1.2)", "Foro Passante (Kf=1.8)", "Spigolo Vivo (Kf=2.5)"], help="Concenztrazioni di stress geometriche che amplificano il carico locale (Kf).")
     kf_dict = {"Superficie Liscia (Kf=1.0)": 1.0, "Raccordo Ampio (Kf=1.2)": 1.2, "Foro Passante (Kf=1.8)": 1.8, "Spigolo Vivo (Kf=2.5)": 2.5}
     kf = kf_dict[forma_intaglio]
 
     st.header("⚖️ Spettro di Carico Primario")
     
-    # --- NUOVO INSERIMENTO: Logica Von Mises per Golf Swing ---
+    # Integrazione Preset per Valori di Carico
     if load == "Golf Swing (Multi-assiale)":
-        sigma_ass = st.number_input("Stress Assiale (MPa)", value=200)
-        tau_tors = st.number_input("Stress Taglio/Torsione (MPa)", value=150)
+        def_sigma_ass = p_data.get("sigma_ass", 200) if p_data else 200
+        def_tau_tors = p_data.get("tau_tors", 150) if p_data else 150
+        sigma_ass = st.number_input("Stress Assiale (MPa)", value=def_sigma_ass)
+        tau_tors = st.number_input("Stress Taglio/Torsione (MPa)", value=def_tau_tors)
         s_max_eq = math.sqrt(sigma_ass**2 + 3 * (tau_tors**2))
         st.info(f"Equivalente Von Mises: {s_max_eq:.1f} MPa")
         s_max = st.number_input("Stress Max Eq. (MPa)", value=float(s_max_eq))
     else:
-        s_max = st.number_input("Stress Max (MPa)", value=400)
+        def_smax = p_data["s_max"] if p_data else 400
+        s_max = st.number_input("Stress Max (MPa)", value=def_smax, help="Picco massimo di stress durante il ciclo.")
         
-    s_min = st.number_input("Stress Min (MPa)", value=1, min_value=1)
-    cycles_yr = st.number_input("Cicli Previsti / Anno", value=100000, step=10000)
+    s_min = st.number_input("Stress Min (MPa)", value=1, min_value=1, help="Stress minimo (se 1 o vicino a 0, indica un ciclo dallo scarico al carico massimo).")
+    
+    def_cycles = p_data["cycles"] if p_data else 100000
+    cycles_yr = st.number_input("Cicli Previsti / Anno", value=def_cycles, step=10000)
+
+    # --- NUOVO INSERIMENTO: Upload CSV per Spettro Reale ---
+    st.header("📊 Spettro Telemetrico (CSV)")
+    uploaded_csv = st.file_uploader("Carica Dati Sensore (Opzionale)", type=["csv"], help="Il file deve avere due colonne (senza intestazione o con nomi qualsiasi): la prima per lo Stress in MPa, la seconda per il numero di Cicli Annuali. Se caricato, si somma ai danni calcolati.")
 
     st.header("💥 Carico Secondario (Miner)")
-    usa_miner = st.checkbox("Aggiungi Impatti Rari / Picchi")
+    usa_miner = st.checkbox("Aggiungi Impatti Rari / Picchi", help="Applica la regola di Miner per combinare il danno del carico primario con un secondo carico occasionale più severo.")
     if usa_miner:
         s_max_2 = st.number_input("Stress Max Sec. (MPa)", value=600)
         s_min_2 = st.number_input("Stress Min Sec. (MPa)", value=1, min_value=1)
@@ -140,7 +162,7 @@ with st.sidebar:
         s_max_2, s_min_2, cycles_yr_2 = 0, 0, 0
 
     st.header("🔄 Confronto (A/B Test)")
-    mat_comp_name = st.selectbox("Seleziona Materiale B (Opzionale)", ["Nessuno"] + list(materials_db.keys()))
+    mat_comp_name = st.selectbox("Seleziona Materiale B (Opzionale)", ["Nessuno"] + list(materials_db.keys()), help="Traccia una seconda curva S-N per confrontare direttamente le prestazioni.")
 
 
 # ==========================================
@@ -150,7 +172,6 @@ def get_k_factors(uts, surf_type, load_type, rel_type, mat_cat, temp, hum):
     surfs = {"Lucidato": (1.58, -0.085), "Lavorato": (4.51, -0.265), "Grezzo": (57.7, -0.718), "Forgiato": (272.0, -0.995)}
     ka = 0.9 if mat_cat in ["Compositi", "Polimeri"] else min(surfs[surf_type][0] * (uts ** surfs[surf_type][1]), 1.0)
     
-    # --- MODIFICA: Aggiunto Golf Swing nei K factors ---
     loads = {"Flessione (Impatto Corsa)": 1.0, "Assiale (Carico Statico)": 0.85, "Torsione (Cambio Direzione)": 0.59, "Golf Swing (Multi-assiale)": 0.70}
     kc = loads.get(load_type, 1.0)
     
@@ -169,7 +190,6 @@ def get_k_factors(uts, surf_type, load_type, rel_type, mat_cat, temp, hum):
 
 ka, kc, ke, kd, kw = get_k_factors(mat['uts'], surf, load, rel, mat['cat'], temp_esercizio, umidita_relativa)
 
-# --- NUOVO INSERIMENTO: Applicazione Microclima ---
 if usa_microclima and mat['cat'] in ["Polimeri", "Compositi"]:
     kd = kd * (1.0 - (0.02 * ore_continue))
 
@@ -206,7 +226,28 @@ else:
 
 danno_1 = cycles_yr / Nf_val if Nf_val > 0 else float('inf')
 danno_2 = cycles_yr_2 / Nf_val_2 if Nf_val_2 > 0 else float('inf')
-danno_totale = danno_1 + danno_2
+
+# --- NUOVO INSERIMENTO: Calcolo Danno da CSV (Regola di Miner Avanzata) ---
+danno_csv = 0
+if uploaded_csv is not None:
+    try:
+        df_spettro = pd.read_csv(uploaded_csv, header=None)
+        # Assumiamo colonna 0 = Stress, colonna 1 = Cicli
+        for idx, row in df_spettro.iterrows():
+            stress_csv = float(row.iloc[0]) * kf
+            cicli_csv = float(row.iloc[1])
+            if stress_csv <= se_corr:
+                nf_csv = float('inf')
+            elif stress_csv >= mat['uts']:
+                nf_csv = 1e-5
+            else:
+                nf_csv = 10 ** ((math.log10(stress_csv) - log_a)/b)
+            danno_csv += cicli_csv / nf_csv if nf_csv > 0 else float('inf')
+        st.sidebar.success("CSV caricato: Danno Telemetrico aggiunto al totale.")
+    except Exception as e:
+        st.sidebar.error(f"Errore lettura CSV. Controlla il formato. ({e})")
+
+danno_totale = danno_1 + danno_2 + danno_csv
 
 if danno_totale >= 1 or s_max >= mat['uts'] or (usa_miner and s_max_2 >= mat['uts']):
     years, Nf = 0, 0
@@ -271,37 +312,64 @@ if mat_comp_name != "Nessuno":
 fig.update_layout(xaxis_type="log", title="Curva di Fatica (Wöhler) - Supernova Oro", height=400)
 st.plotly_chart(fig, use_container_width=True)
 
-# --- NUOVO INSERIMENTO: Sezione Ottimizzazione e Hysteresis (Implementazioni 2 e 3) ---
+# --- NUOVO INSERIMENTO: Tornado Chart e Sezione Avanzata ---
 st.markdown("---")
-st.subheader("🛠️ Modulo Avanzato: Topologia & Decadimento Hysteresis")
-c_opt1, c_opt2 = st.columns(2)
+st.subheader("🛠️ Modulo Avanzato: Ottimizzazione & Diagnostica")
+
+# Preparazione dati Tornado Chart (Penalità in %)
+penalties_dict = {
+    "Finitura Superficiale (Ka)": round((1 - ka) * 100, 1),
+    "Tipo Sollecitazione (Kc)": round((1 - kc) * 100, 1),
+    "Affidabilità Richiesta (Ke)": round((1 - ke) * 100, 1),
+    "Temperatura/Microclima (Kd)": round((1 - kd) * 100, 1),
+    "Umidità Relativa (Kw)": round((1 - kw) * 100, 1),
+    "Effetto Intaglio (Kf)": round((1 - (1/kf)) * 100, 1) if kf > 1.0 else 0.0
+}
+# Filtriamo i fattori che non penalizzano
+penalties_filtered = {k: v for k, v in penalties_dict.items() if v > 0}
+# Ordiniamo dal maggiore al minore impatto
+penalties_sorted = dict(sorted(penalties_filtered.items(), key=lambda item: item[1]))
+
+c_opt1, c_opt2, c_opt3 = st.columns([1.5, 1, 1]) # Diviso in 3 colonne per far spazio alla Tornado
 
 with c_opt1:
-    st.markdown("**1. Ottimizzazione Topologica (Solver Peso/Vita)**")
-    target_anni = st.number_input("Vita Agonistica Target (Anni)", value=4.0, min_value=0.5, step=0.5)
+    st.markdown("**1. Diagnostica Sensibilità (Tornado Chart)**")
+    if penalties_sorted:
+        fig_tornado = go.Figure(go.Bar(
+            x=list(penalties_sorted.values()),
+            y=list(penalties_sorted.keys()),
+            orientation='h',
+            marker=dict(color='#FF4B4B')
+        ))
+        fig_tornado.update_layout(height=250, margin=dict(l=0,r=0,t=30,b=0), title="Fattori di Riduzione Resistenza (%)", xaxis_title="Penalità %")
+        st.plotly_chart(fig_tornado, use_container_width=True)
+    else:
+        st.info("Condizioni Ideali: Nessuna penalizzazione applicata al limite di fatica base.")
+
+with c_opt2:
+    st.markdown("**2. Solver Topologico**")
+    target_anni = st.number_input("Target Vita (Anni)", value=4.0, min_value=0.5, step=0.5)
     target_cicli = target_anni * (cycles_yr + cycles_yr_2)
     
     if target_cicli >= N_end: s_target = se_corr
     else: s_target = 10 ** (log_a + b * math.log10(target_cicli))
     
-    st.info(f"Per garantire {target_anni} anni, lo Stress Equivalente Max non deve superare: **{s_target:.1f} MPa**")
+    st.info(f"Max Stress per target: **{s_target:.1f} MPa**")
     
     if s_eq < s_target and s_eq > 0:
-        st.success(f"📉 Puoi RIDURRE il peso! La sezione è sovradimensionata del {((s_target/s_eq)-1)*100:.1f}% rispetto al target scelto.")
+        st.success(f"📉 Sezione sovradimensionata: -{((s_target/s_eq)-1)*100:.1f}% peso stimato.")
     elif s_eq > s_target:
-        st.error(f"⚠️ Rischio Rottura! Aumenta la sezione (aggiungi peso) del {(1-(s_target/s_eq))*100:.1f}% o passa a un materiale superiore.")
-        
-with c_opt2:
-    st.markdown("**2. Hysteresis (Decadimento Rigidità Stimata)**")
+        st.error(f"⚠️ Rischio: Aumenta la sezione del {(1-(s_target/s_eq))*100:.1f}%.")
+
+with c_opt3:
+    st.markdown("**3. Hysteresis (Decadimento)**")
     fig_stiff = go.Figure()
     
-    # Calcolo di decadimento logaritmico basato su perf_decay limitato
     stiffness = 100 - (perf_decay * (np.log10(n_x) / 6)) 
     stiffness = np.clip(stiffness, 0, 100)
     
-    # SOSTITUITO VERDE ACCESO CON ORO PASTELLO #EEDC82
     fig_stiff.add_trace(go.Scatter(x=n_x, y=stiffness, fill='tozeroy', name="Modulo Elastico (%)", line=dict(color="#EEDC82" if perf_decay < 10 else "#FF4B4B")))
-    fig_stiff.update_layout(xaxis_type="log", height=250, margin=dict(l=0,r=0,t=30,b=0), title="Stiffness Retention % (Modulo Elastico)")
+    fig_stiff.update_layout(xaxis_type="log", height=200, margin=dict(l=0,r=0,t=30,b=0), title="Stiffness Retention %")
     st.plotly_chart(fig_stiff, use_container_width=True)
 
 # ==========================================
@@ -330,7 +398,6 @@ def create_seaborn_temp_image():
     plt.close()
     return tmp_file.name
 
-# AGGIUNTO GRAFICO HYSTERESIS PER PDF
 def create_hysteresis_temp_image():
     plt.figure(figsize=(10, 4))
     sns.set_theme(style="whitegrid")
@@ -355,7 +422,7 @@ def create_hysteresis_temp_image():
 class TablePDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 15)
-        self.set_text_color(212, 175, 55) # Colore Oro Supernova
+        self.set_text_color(212, 175, 55) 
         self.cell(0, 10, 'SUPERNOVA LAB - PROSTHETICS FATIGUE REPORT', 0, 1, 'C')
         self.line(10, 20, 200, 20)
         self.ln(5)
@@ -413,7 +480,6 @@ def generate_full_pdf():
     pdf.add_table_row("Fattore Termico (kd)", f"{kd:.3f}", f"{temp_esercizio} C")
     pdf.add_table_row("Fattore Umidità (kw)", f"{kw:.3f}", f"{umidita_relativa} %")
     pdf.add_table_row("Fattore Intaglio (Kf)", f"{kf:.2f}", forma_intaglio) 
-    # --- MODIFICA PDF: Aggiunta Microclima in tabella ---
     if usa_microclima and mat['cat'] in ["Polimeri", "Compositi"]:
         pdf.add_table_row("Fattore Microclima", "Attivo", f"{ore_continue} ore continue")
     pdf.ln(3)
@@ -426,7 +492,10 @@ def generate_full_pdf():
     pdf.add_table_row("Stress Teorico Primario", f"{int(s_eq)}", "MPa")
     if usa_miner:
         pdf.add_table_row("Stress Teorico Secondario", f"{int(s_eq_2)}", "MPa")
-        pdf.add_table_row("Danno Accumulato", f"{danno_totale*100:.2f} % / anno", "Regola di Miner")
+    # Aggiunta CSV al PDF
+    if uploaded_csv is not None:
+        pdf.add_table_row("Spettro Telemetrico", "Attivo", "Dati da CSV")
+    pdf.add_table_row("Danno Accumulato", f"{danno_totale*100:.2f} % / anno", "Miner Complessivo")
     pdf.add_table_row("Perdita Rigidità Stimata (1 anno)", f"-{perf_decay:.2f} %", "Decadimento")
     pdf.ln(5)
     
@@ -452,9 +521,9 @@ def generate_full_pdf():
     pdf.image(img_path, x=10, w=190)
     os.remove(img_path)
     
-    pdf.add_page() # NUOVA PAGINA PER EVITARE ACCAVALLAMENTI
+    pdf.add_page() 
     
-    # --- SEZIONE 5: OTTIMIZZAZIONE E HYSTERESIS (Aggiunta al PDF) ---
+    # --- SEZIONE 5: OTTIMIZZAZIONE E HYSTERESIS ---
     pdf.chapter_title("5. Ottimizzazione Topologica & Hysteresis")
     pdf.set_font('Arial', '', 11)
     pdf.cell(0, 6, f"Vita Agonistica Target: {target_anni} Anni", 0, 1)
@@ -485,7 +554,7 @@ def generate_full_pdf():
         
     pdf.set_font('Arial', 'I', 11)
     pdf.set_text_color(60, 60, 60)
-    # RIMOSSO Riferimento Olimpiadi 2040 e reso generico per gli utenti
+    
     messaggio_atleta = (f"Nota per {atleta_nome}: L'attuale configurazione in {mat_name} {stato_protesi}. "
                         "Ogni millimetro e ogni megapascal della tua protesi sono stati testati per assicurarti stabilità e potenza in ogni movimento. "
                         "La preparazione per i tuoi obiettivi sportivi richiede un trasferimento di forza chirurgico e senza dispersioni: "
@@ -496,7 +565,6 @@ def generate_full_pdf():
     return pdf.output(dest='S').encode('latin-1')
 
 st.markdown("---")
-# RINOMINATO BOTTONE
 if st.button("📄 Genera Wohler Sim Report"):
     try:
         pdf_bytes = generate_full_pdf()
