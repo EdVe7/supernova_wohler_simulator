@@ -83,10 +83,11 @@ materials_db = {
 # 2. INPUT USER (SIDEBAR)
 # ==========================================
 with st.sidebar:
-    st.header("🏃 Dati Atleta e Setup")
+    st.header("🏃 Profilazione Atleta Avanzata") # NUOVO: Profilazione migliorata
     atleta_nome = st.text_input("Nome Atleta", "Atleta Paralimpico", help="Nome dell'atleta per la generazione del report.")
     atleta_peso = st.number_input("Peso Atleta (kg)", value=75, help="Massa corporea (utile come riferimento per stimare gli stress se non noti).")
-    sport_target = st.text_input("Sport / Obiettivo", "Competizione Agonistica")
+    sport_target = st.text_input("Sport / Obiettivo", "Olimpiadi 2040")
+    classe_mobilita = st.selectbox("Classe / Handicap", ["Open / Nessuna", "Amputazione Monolaterale", "Amputazione Bilaterale", "Mobilità Ridotta"], help="Metadato utile per contestualizzare l'analisi nel report.")
 
     st.header("🎯 Profili Sportivi Rapidi")
     presets = {
@@ -148,8 +149,21 @@ with st.sidebar:
     def_cycles = p_data["cycles"] if p_data else 100000
     cycles_yr = st.number_input("Cicli Previsti / Anno", value=def_cycles, step=10000)
 
-    st.header("📊 Spettro Telemetrico (CSV)")
-    uploaded_csv = st.file_uploader("Carica Dati Sensore (Opzionale)", type=["csv"], help="Il file deve avere due colonne (senza intestazione o con nomi qualsiasi): la prima per lo Stress in MPa, la seconda per il numero di Cicli Annuali. Se caricato, si somma ai danni calcolati.")
+    # NUOVO: Aggiunta opzione per Multi-Assiale custom per TUTTI gli sport
+    st.markdown("---")
+    usa_multiassiale_custom = st.checkbox("⚙️ Attiva Multi-Assiale Custom", help="Usa Von Mises per combinare flessione e torsione anche su sport non-golf.")
+    if usa_multiassiale_custom and load != "Golf Swing (Multi-assiale)":
+        sigma_ass_c = st.number_input("Stress Assiale/Flessionale (MPa)", value=200.0)
+        tau_tors_c = st.number_input("Stress Taglio/Torsionale (MPa)", value=100.0)
+        s_max_eq_c = math.sqrt(sigma_ass_c**2 + 3 * (tau_tors_c**2))
+        st.info(f"Von Mises Calcolato: {s_max_eq_c:.1f} MPa")
+        s_max = s_max_eq_c # Sovrascrive s_max con il calcolo combinato
+
+    # NUOVO: Digital Twin & Telemetria Integrata
+    st.header("📊 Digital Twin & Spettro Telemetrico")
+    st.write("Inserisci i dati sensore manualmente o via CSV.")
+    telemetria_manuale = st.text_area("Input Rapido (Stress, Cicli)", placeholder="Es:\n250, 5000\n300, 1000", help="Inserisci i valori separati da virgola. Una riga per ogni set di carico.")
+    uploaded_csv = st.file_uploader("Carica File (CSV)", type=["csv"], help="Il file deve avere due colonne: Stress in MPa e Cicli Annuali. Si somma ai danni calcolati.")
 
     st.header("💥 Carico Secondario (Miner)")
     usa_miner = st.checkbox("Aggiungi Impatti Rari / Picchi", help="Applica la regola di Miner per combinare il danno del carico primario con un secondo carico occasionale più severo.")
@@ -162,7 +176,6 @@ with st.sidebar:
 
     st.header("🔄 Confronto (A/B Test)")
     mat_comp_name = st.selectbox("Seleziona Materiale B (Opzionale)", ["Nessuno"] + list(materials_db.keys()), help="Traccia una seconda curva S-N per confrontare direttamente le prestazioni.")
-
 
 # ==========================================
 # 3. MOTORE FISICO (CALCOLI) 
@@ -239,11 +252,29 @@ if uploaded_csv is not None:
             else:
                 nf_csv = 10 ** ((math.log10(stress_csv) - log_a)/b)
             danno_csv += cicli_csv / nf_csv if nf_csv > 0 else float('inf')
-        st.sidebar.success("CSV caricato: Danno Telemetrico aggiunto al totale.")
+        st.sidebar.success("CSV caricato: Danno aggiunto.")
     except Exception as e:
-        st.sidebar.error(f"Errore lettura CSV. Controlla il formato. ({e})")
+        st.sidebar.error(f"Errore lettura CSV. ({e})")
 
-danno_totale = danno_1 + danno_2 + danno_csv
+# NUOVO: Calcolo Danno Manuale
+danno_manuale = 0
+if telemetria_manuale:
+    try:
+        for riga in telemetria_manuale.split('\n'):
+            if riga.strip():
+                valori = riga.split(',')
+                if len(valori) == 2:
+                    stress_man = float(valori[0].strip()) * kf
+                    cicli_man = float(valori[1].strip())
+                    if stress_man <= se_corr: nf_man = float('inf')
+                    elif stress_man >= mat['uts']: nf_man = 1e-5
+                    else: nf_man = 10 ** ((math.log10(stress_man) - log_a)/b)
+                    danno_manuale += cicli_man / nf_man if nf_man > 0 else float('inf')
+        st.sidebar.success("Input manuale elaborato.")
+    except Exception as e:
+        st.sidebar.error("Errore formato input manuale.")
+
+danno_totale = danno_1 + danno_2 + danno_csv + danno_manuale # Aggiunto danno manuale
 
 if danno_totale >= 1 or s_max >= mat['uts'] or (usa_miner and s_max_2 >= mat['uts']):
     years, Nf = 0, 0
@@ -283,6 +314,17 @@ if mat_comp_name != "Nessuno":
 # 4. VISUALIZZAZIONE UI
 # ==========================================
 st.title("🦾 Analisi Strutturale Protesi")
+
+# NUOVO: Semaforo Dashboard Rischio
+st.markdown("### 🚥 Dashboard Rischio Operativo")
+if danno_totale >= 1 or s_max >= mat['uts'] or (usa_miner and s_max_2 >= mat['uts']):
+    st.error("🔴 **ALLERTA CRITICA:** Pericolo di rottura catastrofica. Il componente non sopporta il carico. Modificare materiale o sezione.")
+elif isinstance(years, (int, float)) and years <= 2:
+    st.warning(f"🟡 **ISPEZIONE CONSIGLIATA:** Il componente mostra fatica elevata. Sostituzione prevista entro {years} anni.")
+else:
+    st.success("🟢 **SICURO:** Il componente è dimensionato correttamente per il volume di allenamento previsto.")
+st.markdown("---")
+
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Stress Eq. Principale", f"{int(s_eq)} MPa")
 c2.metric("Limite Fatica Corretto", f"{int(se_corr)} MPa")
@@ -466,6 +508,8 @@ def generate_full_pdf():
     # --- SEZIONE 0: DATI ATLETA ---
     pdf.set_font('Arial', 'B', 10)
     pdf.cell(0, 5, f"Atleta: {atleta_nome} ({atleta_peso} kg) | Target Event: {sport_target} | Data: {datetime.datetime.now().strftime('%d/%m/%Y')}", 0, 1)
+    pdf.set_font('Arial', '', 9)
+    pdf.cell(0, 5, f"Classe/Handicap: {classe_mobilita}", 0, 1) # Aggiunta metadato atleta
     pdf.ln(2)
 
     # --- SEZIONE 1: INPUT ---
@@ -498,8 +542,8 @@ def generate_full_pdf():
     pdf.add_table_row("Stress Teorico Primario", f"{int(s_eq)}", "MPa")
     if usa_miner:
         pdf.add_table_row("Stress Teorico Secondario", f"{int(s_eq_2)}", "MPa")
-    if uploaded_csv is not None:
-        pdf.add_table_row("Spettro Telemetrico", "Attivo", "Dati da CSV")
+    if uploaded_csv is not None or telemetria_manuale: # Aggiornato con telemetria manuale
+        pdf.add_table_row("Spettro Telemetrico", "Attivo", "Dati inseriti")
     pdf.add_table_row("Danno Accumulato", f"{danno_totale*100:.2f} % / anno", "Miner Complessivo")
     pdf.add_table_row("Perdita Rigidità Stimata (1 anno)", f"-{perf_decay:.2f} %", "Decadimento")
     pdf.ln(3)
