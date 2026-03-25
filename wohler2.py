@@ -10,7 +10,8 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import tempfile
 import os
-import pandas as pd 
+import pandas as pd
+import json # NUOVO: Necessario per gestire lo Snapshot
 
 # COLORI BRAND SUPERNOVA E ACCENTI
 GOLD_SN = "#D4AF37" 
@@ -83,10 +84,21 @@ materials_db = {
 # 2. INPUT USER (SIDEBAR)
 # ==========================================
 with st.sidebar:
-    st.header("🏃 Profilazione Atleta Avanzata") # NUOVO: Profilazione migliorata
+    # NUOVO: Gestione Snapshot (Import configurazioni salvate)
+    st.header("💾 Snapshot Configurazione")
+    uploaded_json = st.file_uploader("Carica Snapshot (JSON)", type=["json"], help="Carica un setup salvato per applicarlo immediatamente.")
+    config_override = None
+    if uploaded_json is not None:
+        try:
+            config_override = json.load(uploaded_json)
+            st.success("Snapshot applicato con successo ai calcoli!")
+        except Exception as e:
+            st.error("Errore lettura file JSON.")
+            
+    st.header("🏃 Profilazione Atleta Avanzata") 
     atleta_nome = st.text_input("Nome Atleta", "Atleta Paralimpico", help="Nome dell'atleta per la generazione del report.")
     atleta_peso = st.number_input("Peso Atleta (kg)", value=75, help="Massa corporea (utile come riferimento per stimare gli stress se non noti).")
-    sport_target = st.text_input("Sport / Obiettivo", "Olimpiadi 2040")
+    sport_target = st.text_input("Sport / Obiettivo", "Olimpiadi di Golf 2040")
     classe_mobilita = st.selectbox("Classe / Handicap", ["Open / Nessuna", "Amputazione Monolaterale", "Amputazione Bilaterale", "Mobilità Ridotta"], help="Metadato utile per contestualizzare l'analisi nel report.")
 
     st.header("🎯 Profili Sportivi Rapidi")
@@ -132,7 +144,19 @@ with st.sidebar:
 
     st.header("⚖️ Spettro di Carico Primario")
     
-    if load == "Golf Swing (Multi-assiale)":
+    # NUOVO: Convertitore Biomeccanico
+    usa_biomec = st.checkbox("🧮 Calcolatore Biomeccanico", help="Calcola lo stress massimo a partire dalle dinamiche corporee.")
+    
+    if usa_biomec:
+        vel_impatto = st.number_input("Velocità Gesto/Impatto (m/s)", value=45.0)
+        grf_multi = st.number_input("Ground Reaction Force (Moltiplicatore x BW)", value=1.5)
+        # Formula empirica per stimare lo stress in base a peso, accelerazione e forza reazione
+        s_max_biomec = (vel_impatto * 1.5) + (grf_multi * atleta_peso * 0.8)
+        st.info(f"Stress Equivalente Calcolato: {s_max_biomec:.1f} MPa")
+        s_max = float(s_max_biomec)
+        s_min = 1.0
+        
+    elif load == "Golf Swing (Multi-assiale)":
         def_sigma_ass = p_data.get("sigma_ass", 200) if p_data else 200
         def_tau_tors = p_data.get("tau_tors", 150) if p_data else 150
         sigma_ass = st.number_input("Stress Assiale (MPa)", value=def_sigma_ass)
@@ -140,26 +164,24 @@ with st.sidebar:
         s_max_eq = math.sqrt(sigma_ass**2 + 3 * (tau_tors**2))
         st.info(f"Equivalente Von Mises: {s_max_eq:.1f} MPa")
         s_max = st.number_input("Stress Max Eq. (MPa)", value=float(s_max_eq))
+        s_min = st.number_input("Stress Min (MPa)", value=1, min_value=1)
     else:
         def_smax = p_data["s_max"] if p_data else 400
         s_max = st.number_input("Stress Max (MPa)", value=def_smax, help="Picco massimo di stress durante il ciclo.")
+        s_min = st.number_input("Stress Min (MPa)", value=1, min_value=1, help="Stress minimo.")
         
-    s_min = st.number_input("Stress Min (MPa)", value=1, min_value=1, help="Stress minimo (se 1 o vicino a 0, indica un ciclo dallo scarico al carico massimo).")
-    
     def_cycles = p_data["cycles"] if p_data else 100000
     cycles_yr = st.number_input("Cicli Previsti / Anno", value=def_cycles, step=10000)
 
-    # NUOVO: Aggiunta opzione per Multi-Assiale custom per TUTTI gli sport
     st.markdown("---")
     usa_multiassiale_custom = st.checkbox("⚙️ Attiva Multi-Assiale Custom", help="Usa Von Mises per combinare flessione e torsione anche su sport non-golf.")
-    if usa_multiassiale_custom and load != "Golf Swing (Multi-assiale)":
+    if usa_multiassiale_custom and load != "Golf Swing (Multi-assiale)" and not usa_biomec:
         sigma_ass_c = st.number_input("Stress Assiale/Flessionale (MPa)", value=200.0)
         tau_tors_c = st.number_input("Stress Taglio/Torsionale (MPa)", value=100.0)
         s_max_eq_c = math.sqrt(sigma_ass_c**2 + 3 * (tau_tors_c**2))
         st.info(f"Von Mises Calcolato: {s_max_eq_c:.1f} MPa")
-        s_max = s_max_eq_c # Sovrascrive s_max con il calcolo combinato
+        s_max = s_max_eq_c 
 
-    # NUOVO: Digital Twin & Telemetria Integrata
     st.header("📊 Digital Twin & Spettro Telemetrico")
     st.write("Inserisci i dati sensore manualmente o via CSV.")
     telemetria_manuale = st.text_area("Input Rapido (Stress, Cicli)", placeholder="Es:\n250, 5000\n300, 1000", help="Inserisci i valori separati da virgola. Una riga per ogni set di carico.")
@@ -177,8 +199,42 @@ with st.sidebar:
     st.header("🔄 Confronto (A/B Test)")
     mat_comp_name = st.selectbox("Seleziona Materiale B (Opzionale)", ["Nessuno"] + list(materials_db.keys()), help="Traccia una seconda curva S-N per confrontare direttamente le prestazioni.")
 
+    # NUOVO: Export Snapshot
+    current_config = {
+        "mat_name": mat_name, "temp_esercizio": temp_esercizio, "umidita_relativa": umidita_relativa,
+        "usa_microclima": usa_microclima, "ore_continue": ore_continue, "surf": surf, "load": load,
+        "rel": rel, "forma_intaglio": forma_intaglio, "s_max": s_max, "s_min": s_min, "cycles_yr": cycles_yr,
+        "usa_miner": usa_miner, "s_max_2": s_max_2, "s_min_2": s_min_2, "cycles_yr_2": cycles_yr_2
+    }
+    json_str = json.dumps(current_config, indent=4)
+    st.download_button(label="💾 Scarica Configurazione", data=json_str, file_name=f"Setup_{atleta_nome.replace(' ','_')}.json", mime="application/json")
+
+
 # ==========================================
-# 3. MOTORE FISICO (CALCOLI) 
+# GESTIONE OVERRIDE DA SNAPSHOT JSON
+# ==========================================
+if config_override:
+    mat_name = config_override.get("mat_name", mat_name)
+    mat = materials_db.get(mat_name, mat)
+    temp_esercizio = config_override.get("temp_esercizio", temp_esercizio)
+    umidita_relativa = config_override.get("umidita_relativa", umidita_relativa)
+    usa_microclima = config_override.get("usa_microclima", usa_microclima)
+    ore_continue = config_override.get("ore_continue", ore_continue)
+    surf = config_override.get("surf", surf)
+    load = config_override.get("load", load)
+    rel = config_override.get("rel", rel)
+    forma_intaglio = config_override.get("forma_intaglio", forma_intaglio)
+    kf = kf_dict.get(forma_intaglio, kf)
+    s_max = config_override.get("s_max", s_max)
+    s_min = config_override.get("s_min", s_min)
+    cycles_yr = config_override.get("cycles_yr", cycles_yr)
+    usa_miner = config_override.get("usa_miner", usa_miner)
+    s_max_2 = config_override.get("s_max_2", s_max_2)
+    s_min_2 = config_override.get("s_min_2", s_min_2)
+    cycles_yr_2 = config_override.get("cycles_yr_2", cycles_yr_2)
+
+# ==========================================
+# 3. MOTORE FISICO (CALCOLI CON FIX ERRORI MATEMATICI) 
 # ==========================================
 def get_k_factors(uts, surf_type, load_type, rel_type, mat_cat, temp, hum):
     surfs = {"Lucidato": (1.58, -0.085), "Lavorato": (4.51, -0.265), "Grezzo": (57.7, -0.718), "Forgiato": (272.0, -0.995)}
@@ -207,8 +263,11 @@ if usa_microclima and mat['cat'] in ["Polimeri", "Compositi"]:
 
 se_corr = mat['se_base'] * ka * kc * ke * kd * kw
 
+# FIX MATEMATICO: Prevenzione errori logaritmo se se_corr eccede teoricamente S1000
 f = 0.9
 S1000 = f * mat['uts']
+se_corr = min(se_corr, S1000 * 0.99) # Impedisce che b diventi positivo (pendenza anomala)
+
 N_end = 1e6 if mat['cat'] not in ["Alluminio", "Polimeri"] else 5e8
 b = -(math.log10(S1000/se_corr)) / (math.log10(N_end)-3)
 log_a = math.log10(S1000) - 3*b
@@ -217,8 +276,9 @@ sigma_a = (s_max - s_min) / 2
 sigma_m = (s_max + s_min) / 2
 s_eq = (sigma_a / (1 - (sigma_m / mat['uts'])) if sigma_m < mat['uts'] else 9999) * kf
 
+# FIX MATEMATICO: Controllo domini logaritmo
 if s_eq <= se_corr: Nf_val = float('inf')
-elif s_max >= mat['uts']: Nf_val = 1e-5
+elif s_max >= mat['uts'] or s_eq <= 0: Nf_val = 1e-5 
 else:
     Nf_val = 10 ** ((math.log10(s_eq) - log_a)/b)
 
@@ -228,7 +288,7 @@ if usa_miner:
     s_eq_2 = (sigma_a_2 / (1 - (sigma_m_2 / mat['uts'])) if sigma_m_2 < mat['uts'] else 9999) * kf
     
     if s_eq_2 <= se_corr: Nf_val_2 = float('inf')
-    elif s_max_2 >= mat['uts']: Nf_val_2 = 1e-5
+    elif s_max_2 >= mat['uts'] or s_eq_2 <= 0: Nf_val_2 = 1e-5
     else:
         Nf_val_2 = 10 ** ((math.log10(s_eq_2) - log_a)/b)
 else:
@@ -247,7 +307,7 @@ if uploaded_csv is not None:
             cicli_csv = float(row.iloc[1])
             if stress_csv <= se_corr:
                 nf_csv = float('inf')
-            elif stress_csv >= mat['uts']:
+            elif stress_csv >= mat['uts'] or stress_csv <= 0:
                 nf_csv = 1e-5
             else:
                 nf_csv = 10 ** ((math.log10(stress_csv) - log_a)/b)
@@ -256,7 +316,6 @@ if uploaded_csv is not None:
     except Exception as e:
         st.sidebar.error(f"Errore lettura CSV. ({e})")
 
-# NUOVO: Calcolo Danno Manuale
 danno_manuale = 0
 if telemetria_manuale:
     try:
@@ -267,14 +326,14 @@ if telemetria_manuale:
                     stress_man = float(valori[0].strip()) * kf
                     cicli_man = float(valori[1].strip())
                     if stress_man <= se_corr: nf_man = float('inf')
-                    elif stress_man >= mat['uts']: nf_man = 1e-5
+                    elif stress_man >= mat['uts'] or stress_man <= 0: nf_man = 1e-5
                     else: nf_man = 10 ** ((math.log10(stress_man) - log_a)/b)
                     danno_manuale += cicli_man / nf_man if nf_man > 0 else float('inf')
         st.sidebar.success("Input manuale elaborato.")
     except Exception as e:
         st.sidebar.error("Errore formato input manuale.")
 
-danno_totale = danno_1 + danno_2 + danno_csv + danno_manuale # Aggiunto danno manuale
+danno_totale = danno_1 + danno_2 + danno_csv + danno_manuale
 
 if danno_totale >= 1 or s_max >= mat['uts'] or (usa_miner and s_max_2 >= mat['uts']):
     years, Nf = 0, 0
@@ -303,6 +362,7 @@ if mat_comp_name != "Nessuno":
     
     f2 = 0.9
     S1000_2 = f2 * mat2['uts']
+    se_corr2 = min(se_corr2, S1000_2 * 0.99) # Fix
     N_end_2 = 1e6 if mat2['cat'] not in ["Alluminio", "Polimeri"] else 5e8
     b2 = -(math.log10(S1000_2/se_corr2)) / (math.log10(N_end_2)-3)
     log_a2 = math.log10(S1000_2) - 3*b2
@@ -311,100 +371,131 @@ if mat_comp_name != "Nessuno":
     s_y_comp = np.maximum(s_y_comp, se_corr2)
 
 # ==========================================
-# 4. VISUALIZZAZIONE UI
+# 4. VISUALIZZAZIONE UI (CON VISTA TOGGLE)
 # ==========================================
-st.title("🦾 Analisi Strutturale Protesi")
+c_title, c_toggle = st.columns([3, 1])
+with c_title:
+    st.title("🦾 Analisi Strutturale Protesi")
+with c_toggle:
+    st.markdown("<br>", unsafe_allow_html=True)
+    # NUOVO: Toggle Vista Ingegnere / Atleta
+    vista_mode = st.radio("Interfaccia:", ["Vista Ingegnere ⚙️", "Vista Atleta 🏃"], horizontal=True)
 
-# NUOVO: Semaforo Dashboard Rischio
-st.markdown("### 🚥 Dashboard Rischio Operativo")
-if danno_totale >= 1 or s_max >= mat['uts'] or (usa_miner and s_max_2 >= mat['uts']):
-    st.error("🔴 **ALLERTA CRITICA:** Pericolo di rottura catastrofica. Il componente non sopporta il carico. Modificare materiale o sezione.")
-elif isinstance(years, (int, float)) and years <= 2:
-    st.warning(f"🟡 **ISPEZIONE CONSIGLIATA:** Il componente mostra fatica elevata. Sostituzione prevista entro {years} anni.")
-else:
-    st.success("🟢 **SICURO:** Il componente è dimensionato correttamente per il volume di allenamento previsto.")
-st.markdown("---")
-
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Stress Eq. Principale", f"{int(s_eq)} MPa")
-c2.metric("Limite Fatica Corretto", f"{int(se_corr)} MPa")
-c3.metric("Fattore Amb. (kd*kw)", f"{kd*kw:.2f}")
-c4.metric("Vita Utile Stimata", f"{years} anni" if isinstance(years, (int, float)) else years)
-
-st.markdown("---")
-st.metric("Degrado Performance (Perdita Rigidità Stimata a 1 Anno)", f"-{perf_decay:.2f} %" if isinstance(Nf, int) and Nf > 0 else "0.00 %")
-st.markdown("---")
-
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=n_x, y=s_y, name=f"Curva S-N ({mat_name})", line=dict(color=GOLD_SN, width=3)))
-
-if isinstance(Nf, int) and Nf > 0:
-    fig.add_trace(go.Scatter(x=[Nf], y=[s_eq], mode='markers', marker=dict(color=COLOR_RED_ACC, size=12), name="Carico Primario"))
-
-if usa_miner and isinstance(Nf_val_2, float) and Nf_val_2 < float('inf'):
-    fig.add_trace(go.Scatter(x=[int(Nf_val_2)], y=[s_eq_2], mode='markers', marker=dict(color='#FFA500', size=10, symbol='x'), name="Carico Secondario"))
-
-if mat_comp_name != "Nessuno":
-    fig.add_trace(go.Scatter(x=n_x, y=s_y_comp, name=f"Confronto: {mat_comp_name}", line=dict(color="#A0B0C0", width=2, dash='dash')))
-
-fig.update_layout(xaxis_type="log", title="Curva di Fatica (Wöhler) - Supernova Oro", height=400)
-st.plotly_chart(fig, use_container_width=True)
-
-st.markdown("---")
-st.subheader("🛠️ Modulo Avanzato: Ottimizzazione & Diagnostica")
-
-penalties_dict = {
-    "Finitura Superficiale (Ka)": round((1 - ka) * 100, 1),
-    "Tipo Sollecitazione (Kc)": round((1 - kc) * 100, 1),
-    "Affidabilità Richiesta (Ke)": round((1 - ke) * 100, 1),
-    "Temperatura/Microclima (Kd)": round((1 - kd) * 100, 1),
-    "Umidità Relativa (Kw)": round((1 - kw) * 100, 1),
-    "Effetto Intaglio (Kf)": round((1 - (1/kf)) * 100, 1) if kf > 1.0 else 0.0
-}
-penalties_filtered = {k: v for k, v in penalties_dict.items() if v > 0}
-penalties_sorted = dict(sorted(penalties_filtered.items(), key=lambda item: item[1]))
-
-c_opt1, c_opt2, c_opt3 = st.columns([1.5, 1, 1]) 
-
-with c_opt1:
-    st.markdown("**1. Diagnostica Sensibilità (Tornado Chart)**")
-    if penalties_sorted:
-        fig_tornado = go.Figure(go.Bar(
-            x=list(penalties_sorted.values()),
-            y=list(penalties_sorted.keys()),
-            orientation='h',
-            marker=dict(color=COLOR_RED_ACC)
-        ))
-        fig_tornado.update_layout(height=250, margin=dict(l=0,r=0,t=30,b=0), title="Fattori di Riduzione Resistenza (%)", xaxis_title="Penalità %")
-        st.plotly_chart(fig_tornado, use_container_width=True)
+if vista_mode == "Vista Atleta 🏃":
+    st.markdown("### 🚦 Status Componente")
+    if danno_totale >= 1 or s_max >= mat['uts'] or (usa_miner and s_max_2 >= mat['uts']):
+        st.error("🔴 **RIGETTO:** Rischio di rottura immediato. Materiale o configurazione non adeguata.")
+    elif isinstance(years, (int, float)) and years <= 2:
+        st.warning("🟡 **ATTENZIONE:** Il materiale resisterà, ma perderà molta spinta elastica. Valuta sostituzioni frequenti.")
     else:
-        st.info("Condizioni Ideali: Nessuna penalizzazione applicata al limite di fatica base.")
+        st.success("🟢 **READY TO COMPETE:** Il setup è solido e la trasmissione di potenza rimarrà costante nel tempo.")
+        
+    spinta_residua = 100.0 - perf_decay
+    st.metric("Efficienza / Spinta Elastica Residua Stimata (Anno 1)", f"{spinta_residua:.1f}%")
+    st.progress(int(spinta_residua) if spinta_residua > 0 else 0)
+    
+else:
+    # VISTA INGEGNERE ORIGINALE (Mantenuta Pedissequamente)
+    st.markdown("### 🚥 Dashboard Rischio Operativo")
+    if danno_totale >= 1 or s_max >= mat['uts'] or (usa_miner and s_max_2 >= mat['uts']):
+        st.error("🔴 **ALLERTA CRITICA:** Pericolo di rottura catastrofica. Il componente non sopporta il carico. Modificare materiale o sezione.")
+    elif isinstance(years, (int, float)) and years <= 2:
+        st.warning(f"🟡 **ISPEZIONE CONSIGLIATA:** Il componente mostra fatica elevata. Sostituzione prevista entro {years} anni.")
+    else:
+        st.success("🟢 **SICURO:** Il componente è dimensionato correttamente per il volume di allenamento previsto.")
+    st.markdown("---")
 
-with c_opt2:
-    st.markdown("**2. Solver Topologico**")
-    target_anni = st.number_input("Target Vita (Anni)", value=4.0, min_value=0.5, step=0.5)
-    target_cicli = target_anni * (cycles_yr + cycles_yr_2)
-    
-    if target_cicli >= N_end: s_target = se_corr
-    else: s_target = 10 ** (log_a + b * math.log10(target_cicli))
-    
-    st.info(f"Max Stress per target: **{s_target:.1f} MPa**")
-    
-    if s_eq < s_target and s_eq > 0:
-        st.success(f"📉 Sezione sovradimensionata: -{((s_target/s_eq)-1)*100:.1f}% peso stimato.")
-    elif s_eq > s_target:
-        st.error(f"⚠️ Rischio: Aumenta la sezione del {(1-(s_target/s_eq))*100:.1f}%.")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Stress Eq. Principale", f"{int(s_eq)} MPa")
+    c2.metric("Limite Fatica Corretto", f"{int(se_corr)} MPa")
+    c3.metric("Fattore Amb. (kd*kw)", f"{kd*kw:.2f}")
+    c4.metric("Vita Utile Stimata", f"{years} anni" if isinstance(years, (int, float)) else years)
 
-with c_opt3:
-    st.markdown("**3. Hysteresis (Decadimento)**")
-    fig_stiff = go.Figure()
-    
-    stiffness = 100 - (perf_decay * (np.log10(n_x) / 6)) 
-    stiffness = np.clip(stiffness, 0, 100)
-    
-    fig_stiff.add_trace(go.Scatter(x=n_x, y=stiffness, fill='tozeroy', name="Modulo Elastico (%)", line=dict(color=COLOR_GOLD_ACC if perf_decay < 10 else COLOR_RED_ACC)))
-    fig_stiff.update_layout(xaxis_type="log", height=200, margin=dict(l=0,r=0,t=30,b=0), title="Stiffness Retention %")
-    st.plotly_chart(fig_stiff, use_container_width=True)
+    st.markdown("---")
+    st.metric("Degrado Performance (Perdita Rigidità Stimata a 1 Anno)", f"-{perf_decay:.2f} %" if isinstance(Nf, int) and Nf > 0 else "0.00 %")
+    st.markdown("---")
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=n_x, y=s_y, name=f"Curva S-N ({mat_name})", line=dict(color=GOLD_SN, width=3)))
+
+    if isinstance(Nf, int) and Nf > 0:
+        fig.add_trace(go.Scatter(x=[Nf], y=[s_eq], mode='markers', marker=dict(color=COLOR_RED_ACC, size=12), name="Carico Primario"))
+
+    if usa_miner and isinstance(Nf_val_2, float) and Nf_val_2 < float('inf'):
+        fig.add_trace(go.Scatter(x=[int(Nf_val_2)], y=[s_eq_2], mode='markers', marker=dict(color='#FFA500', size=10, symbol='x'), name="Carico Secondario"))
+
+    if mat_comp_name != "Nessuno":
+        fig.add_trace(go.Scatter(x=n_x, y=s_y_comp, name=f"Confronto: {mat_comp_name}", line=dict(color="#A0B0C0", width=2, dash='dash')))
+
+    fig.update_layout(xaxis_type="log", title="Curva di Fatica (Wöhler) - Supernova Oro", height=400)
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("🛠️ Modulo Avanzato: Ottimizzazione & Diagnostica")
+
+    penalties_dict = {
+        "Finitura Superficiale (Ka)": round((1 - ka) * 100, 1),
+        "Tipo Sollecitazione (Kc)": round((1 - kc) * 100, 1),
+        "Affidabilità Richiesta (Ke)": round((1 - ke) * 100, 1),
+        "Temperatura/Microclima (Kd)": round((1 - kd) * 100, 1),
+        "Umidità Relativa (Kw)": round((1 - kw) * 100, 1),
+        "Effetto Intaglio (Kf)": round((1 - (1/kf)) * 100, 1) if kf > 1.0 else 0.0
+    }
+    penalties_filtered = {k: v for k, v in penalties_dict.items() if v > 0}
+    penalties_sorted = dict(sorted(penalties_filtered.items(), key=lambda item: item[1]))
+
+    c_opt1, c_opt2, c_opt3 = st.columns([1.5, 1, 1]) 
+
+    with c_opt1:
+        st.markdown("**1. Diagnostica Sensibilità (Tornado Chart)**")
+        if penalties_sorted:
+            fig_tornado = go.Figure(go.Bar(
+                x=list(penalties_sorted.values()),
+                y=list(penalties_sorted.keys()),
+                orientation='h',
+                marker=dict(color=COLOR_RED_ACC)
+            ))
+            fig_tornado.update_layout(height=250, margin=dict(l=0,r=0,t=30,b=0), title="Fattori di Riduzione Resistenza (%)", xaxis_title="Penalità %")
+            st.plotly_chart(fig_tornado, use_container_width=True)
+        else:
+            st.info("Condizioni Ideali: Nessuna penalizzazione applicata al limite di fatica base.")
+
+    with c_opt2:
+        st.markdown("**2. Solver Topologico**")
+        target_anni = st.number_input("Target Vita (Anni)", value=4.0, min_value=0.5, step=0.5)
+        target_cicli = target_anni * (cycles_yr + cycles_yr_2)
+        
+        if target_cicli >= N_end: s_target = se_corr
+        else: s_target = 10 ** (log_a + b * math.log10(target_cicli))
+        
+        st.info(f"Max Stress per target: **{s_target:.1f} MPa**")
+        
+        if s_eq < s_target and s_eq > 0:
+            st.success(f"📉 Sezione sovradimensionata: -{((s_target/s_eq)-1)*100:.1f}% peso stimato.")
+        elif s_eq > s_target:
+            st.error(f"⚠️ Rischio: Aumenta la sezione del {(1-(s_target/s_eq))*100:.1f}%.")
+
+    with c_opt3:
+        st.markdown("**3. Hysteresis (Decadimento)**")
+        fig_stiff = go.Figure()
+        
+        stiffness = 100 - (perf_decay * (np.log10(n_x) / 6)) 
+        stiffness = np.clip(stiffness, 0, 100)
+        
+        fig_stiff.add_trace(go.Scatter(x=n_x, y=stiffness, fill='tozeroy', name="Modulo Elastico (%)", line=dict(color=COLOR_GOLD_ACC if perf_decay < 10 else COLOR_RED_ACC)))
+        fig_stiff.update_layout(xaxis_type="log", height=200, margin=dict(l=0,r=0,t=30,b=0), title="Stiffness Retention %")
+        st.plotly_chart(fig_stiff, use_container_width=True)
+
+    # NUOVO: Proiezione Timeline Dinamica (Macro-Cicli)
+    st.markdown("---")
+    st.subheader("📈 Proiezione Danno su Macro-Cicli (Timeline Orizzonte Olimpico)")
+    anni_proj = np.arange(1, 16)
+    danno_cum_proj = np.clip(anni_proj * danno_totale * 100, 0, 100)
+    fig_timeline = go.Figure()
+    fig_timeline.add_trace(go.Scatter(x=anni_proj, y=danno_cum_proj, mode='lines+markers', line=dict(color=COLOR_RED_ACC, width=3), name="Danno Cumulato %"))
+    fig_timeline.add_hline(y=100, line_dash="dash", line_color="black", annotation_text="Punto di Rottura")
+    fig_timeline.update_layout(height=250, margin=dict(l=0,r=0,t=30,b=0), xaxis_title="Anni di Utilizzo Continuativo", yaxis_title="Danno Strutturale %")
+    st.plotly_chart(fig_timeline, use_container_width=True)
 
 # ==========================================
 # 5. GENERATORE PDF COMPATTO E COMPLETO
@@ -469,8 +560,38 @@ def create_hysteresis_temp_image():
     plt.close()
     return tmp_file.name
 
+# NUOVO: Immagine per Timeline da inserire nel PDF
+def create_timeline_temp_image():
+    plt.figure(figsize=(9, 3))
+    sns.set_theme(style="whitegrid")
+    anni_proj = np.arange(1, 16)
+    danno_cum_proj = np.clip(anni_proj * danno_totale * 100, 0, 100)
+    plt.plot(anni_proj, danno_cum_proj, color=COLOR_RED_ACC, marker='o', linewidth=2.5)
+    plt.axhline(100, color="black", linestyle="--")
+    plt.title("Proiezione Danno su Macro-Cicli", fontsize=11, fontweight='bold')
+    plt.xlabel("Anni", fontsize=9)
+    plt.ylabel("Danno Cumulato %", fontsize=9)
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    plt.savefig(tmp_file.name, format="png", bbox_inches="tight", dpi=300)
+    plt.close()
+    return tmp_file.name
+
 class TablePDF(FPDF):
     def header(self):
+        # ---------------------------------------------------------
+        # 🟢 INIZIO CODICE LOGO PDF
+        # Se genera un errore al download perché non trova "logo.png" 
+        # (es. se deployato su cloud senza path corretta), 
+        # cancella le 4 righe sottostanti dal "try" all'"except: pass"
+        # ---------------------------------------------------------
+        try:
+            self.image("logo.png", 10, 8, 20)
+        except:
+            pass
+        # ---------------------------------------------------------
+        # 🔴 FINE CODICE LOGO PDF
+        # ---------------------------------------------------------
+
         self.set_font('Arial', 'B', 14)
         self.set_text_color(212, 175, 55) 
         self.cell(0, 6, 'SUPERNOVA LAB - PROSTHETICS FATIGUE REPORT', 0, 1, 'C')
@@ -519,6 +640,9 @@ def generate_full_pdf():
     pdf.add_table_row("Carico Rottura Statico (UTS)", f"{mat['uts']}", "MPa")
     pdf.add_table_row("Limite Snervamento (Yield)", f"{mat['yield']}", "MPa")
     pdf.add_table_row("Cicli Annuali Previsti", f"{cycles_yr:,}", "Cicli Primari")
+    # NUOVO: Aggiunta info biomeccanica se usata
+    if usa_biomec:
+        pdf.add_table_row("Metodo Calcolo Stress", "Biomeccanica Inversa", "Attivo")
     pdf.ln(2)
 
     # --- SEZIONE 2: FATIGUE MODIFIERS ---
@@ -542,7 +666,7 @@ def generate_full_pdf():
     pdf.add_table_row("Stress Teorico Primario", f"{int(s_eq)}", "MPa")
     if usa_miner:
         pdf.add_table_row("Stress Teorico Secondario", f"{int(s_eq_2)}", "MPa")
-    if uploaded_csv is not None or telemetria_manuale: # Aggiornato con telemetria manuale
+    if uploaded_csv is not None or telemetria_manuale: 
         pdf.add_table_row("Spettro Telemetrico", "Attivo", "Dati inseriti")
     pdf.add_table_row("Danno Accumulato", f"{danno_totale*100:.2f} % / anno", "Miner Complessivo")
     pdf.add_table_row("Perdita Rigidità Stimata (1 anno)", f"-{perf_decay:.2f} %", "Decadimento")
@@ -578,20 +702,13 @@ def generate_full_pdf():
     pdf.ln(3)
     
     # --- SEZIONE 6: OTTIMIZZAZIONE E HYSTERESIS ---
-    pdf.chapter_title("6. Ottimizzazione Topologica & Hysteresis")
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 5, f"Vita Agonistica Target: {target_anni} Anni | Stress Max consentito: {s_target:.1f} MPa", 0, 1)
-    
-    if s_eq < s_target and s_eq > 0:
-        msg_opt = f"Esito: Puoi RIDURRE il peso. La sezione e' sovradimensionata del {((s_target/s_eq)-1)*100:.1f}% rispetto al target scelto."
-    elif s_eq > s_target:
-        msg_opt = f"Allerta: Rischio Rottura. Aumentare la sezione (aggiungi peso) del {(1-(s_target/s_eq))*100:.1f}% o passare a un materiale superiore."
-    else:
-        msg_opt = "La sezione è perfettamente ottimizzata per il target."
-        
-    pdf.multi_cell(0, 5, msg_opt)
-    pdf.ln(3)
-    
+    # NUOVO: Aggiunta Timeline Grafico PDF
+    pdf.chapter_title("6. Proiezione Macro-Cicli e Hysteresis")
+    img_path_timeline = create_timeline_temp_image()
+    pdf.image(img_path_timeline, x=10, w=190)
+    os.remove(img_path_timeline)
+    pdf.ln(2)
+
     img_path_2 = create_hysteresis_temp_image()
     pdf.image(img_path_2, x=10, w=190)
     os.remove(img_path_2)
