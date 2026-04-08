@@ -50,6 +50,8 @@ if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 if "username" not in st.session_state:
     st.session_state["username"] = ""
+if "telemetry_entries" not in st.session_state:
+    st.session_state["telemetry_entries"] = []
 
 if not st.session_state["authenticated"]:
     st.markdown("<h3 style='text-align:center;'>🔒 Accesso Riservato Lab</h3>", unsafe_allow_html=True)
@@ -93,7 +95,9 @@ materials_db = {
 with st.sidebar:
     # NUOVO: Gestione Snapshot (Import configurazioni salvate)
     st.header("💾 Snapshot Configurazione")
-    uploaded_json = st.file_uploader("Carica Snapshot (JSON)", type=["json"], help="Carica un setup salvato per applicarlo immediatamente.")
+    st.caption("Modalita rapida consigliata: imposta i parametri direttamente nei campi qui sotto.")
+    with st.expander("Opzioni avanzate (import da file)", expanded=False):
+        uploaded_json = st.file_uploader("Carica Snapshot (JSON)", type=["json"], help="Opzionale: importa una configurazione salvata da tecnico o staff.")
     config_override = None
     if uploaded_json is not None:
         try:
@@ -106,7 +110,7 @@ with st.sidebar:
     st.header("🏃 Profilazione Atleta Avanzata")
     atleta_nome = st.text_input("Nome Atleta", "Atleta Paralimpico", help="Nome dell'atleta per la generazione del report.")
     atleta_peso = st.number_input("Peso Atleta (kg)", value=75, help="Massa corporea (utile come riferimento per stimare gli stress se non noti).")
-    sport_target = st.text_input("Sport / Obiettivo", "Olimpiadi di Golf 2040")
+    sport_target = st.text_input("Sport / Obiettivo", "Olimpiadi di Golf 2040", help="Descrive il contesto di utilizzo: gara target o fase della stagione.")
     classe_mobilita = st.selectbox("Classe / Handicap", ["Open / Nessuna", "Amputazione Monolaterale", "Amputazione Bilaterale", "Mobilità Ridotta"], help="Metadato utile per contestualizzare l'analisi nel report.")
 
     st.header("🎯 Profili Sportivi Rapidi")
@@ -134,7 +138,7 @@ with st.sidebar:
 
     st.header("🌡️ Microclima Socket")
     usa_microclima = st.checkbox("Accumulo Calore (Cicli Continui)", help="Attiva se l'atleta svolge sessioni lunghe senza togliere la protesi.")
-    ore_continue = st.slider("Ore Sessione Continuous", 1, 10, 4) if usa_microclima else 0
+    ore_continue = st.slider("Ore Sessione Continuous", 1, 10, 4, help="Durata media di una sessione senza pause complete del socket.") if usa_microclima else 0
 
     st.header("📉 Fattori Marin")
     surf = st.selectbox("Finitura Superficiale", ["Lucidato", "Lavorato", "Grezzo", "Forgiato"], help="Maggiore è la rugosità, maggiore è la probabilità di innesco cricche (Fattore Ka).")
@@ -156,8 +160,8 @@ with st.sidebar:
     usa_biomec = st.checkbox("🧮 Calcolatore Biomeccanico", help="Calcola lo stress massimo a partire dalle dinamiche corporee.")
 
     if usa_biomec:
-        vel_impatto = st.number_input("Velocità Gesto/Impatto (m/s)", value=45.0)
-        grf_multi = st.number_input("Ground Reaction Force (Moltiplicatore x BW)", value=1.5)
+        vel_impatto = st.number_input("Velocità Gesto/Impatto (m/s)", value=45.0, help="Velocita tipica del gesto nel momento piu critico.")
+        grf_multi = st.number_input("Ground Reaction Force (Moltiplicatore x BW)", value=1.5, help="Moltiplicatore della forza verticale rispetto al peso corporeo.")
         # Formula empirica per stimare lo stress in base a peso, accelerazione e forza reazione
         s_max_biomec = (vel_impatto * 1.5) + (grf_multi * atleta_peso * 0.8)
         st.info(f"Stress Equivalente Calcolato: {s_max_biomec:.1f} MPa")
@@ -167,8 +171,8 @@ with st.sidebar:
     elif load == "Golf Swing (Multi-assiale)":
         def_sigma_ass = p_data.get("sigma_ass", 200) if p_data else 200
         def_tau_tors = p_data.get("tau_tors", 150) if p_data else 150
-        sigma_ass = st.number_input("Stress Assiale (MPa)", value=def_sigma_ass)
-        tau_tors = st.number_input("Stress Taglio/Torsione (MPa)", value=def_tau_tors)
+        sigma_ass = st.number_input("Stress Assiale (MPa)", value=def_sigma_ass, help="Componente normale del carico (trazione/compressione).")
+        tau_tors = st.number_input("Stress Taglio/Torsione (MPa)", value=def_tau_tors, help="Componente tangenziale indotta dal gesto rotazionale.")
         s_max_eq = math.sqrt(sigma_ass**2 + 3 * (tau_tors**2))
         st.info(f"Equivalente Von Mises: {s_max_eq:.1f} MPa")
         s_max = st.number_input("Stress Max Eq. (MPa)", value=float(s_max_eq))
@@ -179,7 +183,7 @@ with st.sidebar:
         s_min = st.number_input("Stress Min (MPa)", value=1, min_value=1, help="Stress minimo.")
 
     def_cycles = p_data["cycles"] if p_data else 100000
-    cycles_yr = st.number_input("Cicli Previsti / Anno", value=def_cycles, step=10000)
+    cycles_yr = st.number_input("Cicli Previsti / Anno", value=def_cycles, step=10000, help="Numero totale di cicli principali previsti in un anno.")
 
     st.markdown("---")
     usa_multiassiale_custom = st.checkbox("⚙️ Attiva Multi-Assiale Custom", help="Usa Von Mises per combinare flessione e torsione anche su sport non-golf.")
@@ -191,16 +195,34 @@ with st.sidebar:
         s_max = s_max_eq_c
 
     st.header("📊 Digital Twin & Spettro Telemetrico")
-    st.write("Inserisci i dati sensore manualmente o via CSV.")
-    st.download_button(
-        "⬇️ Scarica Template CSV",
-        data="stress,cicli,tipo_sessione\n250,5000,allenamento\n300,1000,gara\n",
-        file_name="template_telemetria_supernova.csv",
-        mime="text/csv"
-    )
-    telemetria_manuale = st.text_area("Input Rapido (Stress, Cicli)", placeholder="Es:\n250, 5000\n300, 1000", help="Inserisci i valori separati da virgola. Una riga per ogni set di carico.")
-    uploaded_csv = st.file_uploader("Carica File (CSV)", type=["csv"], help="Il file deve avere due colonne: Stress in MPa e Cicli Annuali. Si somma ai danni calcolati.")
-    csv_autofix = st.checkbox("Auto-fix CSV (header/separatore)", value=True)
+    st.write("Inserisci i dati in modo guidato (consigliato).")
+    c_tel1, c_tel2 = st.columns(2)
+    stress_quick = c_tel1.number_input("Stress evento (MPa)", value=250.0, min_value=0.0, help="Picco di stress registrato in una sessione tipo.")
+    cicli_quick = c_tel2.number_input("Cicli evento", value=5000.0, min_value=0.0, help="Quante ripetizioni/cicli sono associati a quello stress.")
+    c_btn1, c_btn2 = st.columns(2)
+    if c_btn1.button("➕ Aggiungi evento telemetrico", use_container_width=True):
+        st.session_state["telemetry_entries"].append({"stress": float(stress_quick), "cicli": float(cicli_quick)})
+        st.success("Evento telemetrico aggiunto.")
+    if c_btn2.button("🧹 Pulisci eventi", use_container_width=True):
+        st.session_state["telemetry_entries"] = []
+        st.info("Eventi telemetrici azzerati.")
+
+    if st.session_state["telemetry_entries"]:
+        quick_df = pd.DataFrame(st.session_state["telemetry_entries"])
+        st.dataframe(quick_df, use_container_width=True, height=150)
+    else:
+        quick_df = pd.DataFrame(columns=["stress", "cicli"])
+
+    with st.expander("Opzioni avanzate (input testo/file)", expanded=False):
+        st.download_button(
+            "⬇️ Scarica Template CSV",
+            data="stress,cicli,tipo_sessione\n250,5000,allenamento\n300,1000,gara\n",
+            file_name="template_telemetria_supernova.csv",
+            mime="text/csv"
+        )
+        telemetria_manuale = st.text_area("Input Rapido (Stress, Cicli)", placeholder="Es:\n250, 5000\n300, 1000", help="Inserisci i valori separati da virgola. Una riga per ogni set di carico.")
+        uploaded_csv = st.file_uploader("Carica File (CSV)", type=["csv"], help="Opzionale: due colonne con stress (MPa) e cicli annuali.")
+        csv_autofix = st.checkbox("Auto-fix CSV (header/separatore)", value=True, help="Prova a correggere automaticamente separatori e intestazioni comuni.")
 
     st.header("💥 Carico Secondario (Miner)")
     usa_miner = st.checkbox("Aggiungi Impatti Rari / Picchi", help="Applica la regola di Miner per combinare il danno del carico primario con un secondo carico occasionale più severo.")
@@ -216,26 +238,25 @@ with st.sidebar:
 
     # 10 aggiunte ingegneristiche
     st.header("🧠 Modulo Pro (10 Add-on)")
-    asymmetry_idx = st.slider("Indice Asimmetria Appoggio (%)", 0, 30, 8)
-    uncertainty_model = st.slider("Incertezza Modello (%)", 0, 30, 8)
-    shock_events = st.number_input("Eventi Shock/Mese", value=3, min_value=0)
-    compliance_target = st.slider("Compliance Allenamento (%)", 0, 100, 80)
-    recovery_quality = st.slider("Qualità Recupero (%)", 0, 100, 70)
-    maintenance_plan = st.selectbox("Piano Ispezione", ["Settimanale", "Bisettimanale", "Mensile"])
-    alert_mode = st.selectbox("Modalità Allerta", ["Conservativa", "Bilanciata", "Performance"])
-    export_kpi_csv = st.checkbox("Export KPI in CSV", value=True)
-    export_json_tech = st.checkbox("Export tecnico JSON", value=True)
-    anomaly_guard = st.checkbox("Guardia anomalie telemetria", value=True)
+    asymmetry_idx = st.slider("Indice Asimmetria Appoggio (%)", 0, 30, 8, help="Differenza media di carico tra lato protesico e controlaterale.")
+    uncertainty_model = st.slider("Incertezza Modello (%)", 0, 30, 8, help="Margine prudenziale applicato ai risultati del simulatore.")
+    shock_events = st.number_input("Eventi Shock/Mese", value=3, min_value=0, help="Numero stimato di impatti severi non periodici.")
+    compliance_target = st.slider("Compliance Allenamento (%)", 0, 100, 80, help="Quanto l'atleta segue realmente il piano tecnico previsto.")
+    recovery_quality = st.slider("Qualità Recupero (%)", 0, 100, 70, help="Qualita media del recupero tra sessioni (sonno, fisioterapia, riposo).")
+    maintenance_plan = st.selectbox("Piano Ispezione", ["Settimanale", "Bisettimanale", "Mensile"], help="Frequenza raccomandata per check meccanici e controllo socket.")
+    alert_mode = st.selectbox("Modalità Allerta", ["Conservativa", "Bilanciata", "Performance"], help="Conservativa aumenta la cautela, Performance accetta piu rischio controllato.")
+    anomaly_guard = st.checkbox("Guardia anomalie telemetria", value=True, help="Evidenzia picchi anomali nei dati stress per individuare pattern critici.")
 
-    # NUOVO: Export Snapshot
+    # Snapshot tecnico disponibile solo in area avanzata.
     current_config = {
         "mat_name": mat_name, "temp_esercizio": temp_esercizio, "umidita_relativa": umidita_relativa,
         "usa_microclima": usa_microclima, "ore_continue": ore_continue, "surf": surf, "load": load,
         "rel": rel, "forma_intaglio": forma_intaglio, "s_max": s_max, "s_min": s_min, "cycles_yr": cycles_yr,
         "usa_miner": usa_miner, "s_max_2": s_max_2, "s_min_2": s_min_2, "cycles_yr_2": cycles_yr_2
     }
-    json_str = json.dumps(current_config, indent=4)
-    st.download_button(label="💾 Scarica Configurazione", data=json_str, file_name=f"Setup_{atleta_nome.replace(' ','_')}.json", mime="application/json")
+    with st.expander("Opzioni avanzate (export setup tecnico)", expanded=False):
+        json_str = json.dumps(current_config, indent=4)
+        st.download_button(label="💾 Scarica Configurazione (JSON tecnico)", data=json_str, file_name=f"Setup_{atleta_nome.replace(' ','_')}.json", mime="application/json")
 
 
 # ==========================================
@@ -379,8 +400,24 @@ if telemetria_manuale:
     except Exception as e:
         st.sidebar.error("Errore formato input manuale.")
 
+danno_quick = 0
+if not quick_df.empty:
+    try:
+        for _, row in quick_df.iterrows():
+            stress_quick_row = float(row["stress"]) * kf
+            cicli_quick_row = float(row["cicli"])
+            if stress_quick_row <= se_corr:
+                nf_quick = float('inf')
+            elif stress_quick_row >= mat['uts'] or stress_quick_row <= 0:
+                nf_quick = 1e-5
+            else:
+                nf_quick = 10 ** ((math.log10(stress_quick_row) - log_a)/b)
+            danno_quick += cicli_quick_row / nf_quick if nf_quick > 0 else float('inf')
+    except Exception:
+        st.sidebar.error("Errore nei dati telemetrici guidati.")
+
 danno_shock = (shock_events * 30.0) / max(Nf_val, 1.0)
-danno_totale = danno_1 + danno_2 + danno_csv + danno_manuale + danno_shock
+danno_totale = danno_1 + danno_2 + danno_csv + danno_manuale + danno_quick + danno_shock
 
 if danno_totale >= 1 or s_max >= mat['uts'] or (usa_miner and s_max_2 >= mat['uts']):
     years, Nf = 0, 0
@@ -425,6 +462,10 @@ if anomaly_guard and csv_preview_df is not None and not csv_preview_df.empty:
 n_x = np.logspace(3, 8, 50)
 s_y = (10**log_a) * (n_x**b) if isinstance(Nf, int) and Nf > 0 else np.zeros_like(n_x)
 s_y = np.maximum(s_y, se_corr)
+anni_proj = np.arange(1, 16)
+danno_cum_proj = np.clip(anni_proj * danno_totale * 100, 0, 100)
+rigidita_annua = np.clip(100 - (anni_proj * perf_decay), 0, 100)
+prestazione_annua = np.clip(100 - (anni_proj * perf_decay * 0.8), 0, 100)
 
 if mat_comp_name != "Nessuno":
     mat2 = materials_db[mat_comp_name]
@@ -475,6 +516,14 @@ if vista_mode == "Vista Atleta 🏃":
     c_ra.metric("Risk Class", risk_class)
     c_rb.metric("Recovery Index", f"{recovery_index:.1f}%")
     c_rc.metric("Compliance", f"{compliance_score:.1f}%")
+    st.markdown("---")
+    st.subheader("📉 Evoluzione Rigidità e Prestazione (anni)")
+    st.caption("Il grafico mostra la perdita stimata nel tempo: la rigidita scende piu rapidamente della prestazione percepita.")
+    fig_perf_years = go.Figure()
+    fig_perf_years.add_trace(go.Scatter(x=anni_proj, y=rigidita_annua, mode='lines+markers', name="Rigidita residua %", line=dict(color=COLOR_RED_ACC, width=3)))
+    fig_perf_years.add_trace(go.Scatter(x=anni_proj, y=prestazione_annua, mode='lines+markers', name="Prestazione residua %", line=dict(color=COLOR_GOLD_ACC, width=3)))
+    fig_perf_years.update_layout(height=280, margin=dict(l=0, r=0, t=30, b=0), xaxis_title="Anni", yaxis_title="Percentuale residua")
+    st.plotly_chart(fig_perf_years, use_container_width=True)
 
 else:
     # VISTA INGEGNERE ORIGINALE (Mantenuta Pedissequamente)
@@ -571,8 +620,6 @@ else:
     # NUOVO: Proiezione Timeline Dinamica (Macro-Cicli)
     st.markdown("---")
     st.subheader("📈 Proiezione Danno su Macro-Cicli (Timeline Orizzonte Olimpico)")
-    anni_proj = np.arange(1, 16)
-    danno_cum_proj = np.clip(anni_proj * danno_totale * 100, 0, 100)
     fig_timeline = go.Figure()
     fig_timeline.add_trace(go.Scatter(x=anni_proj, y=danno_cum_proj, mode='lines+markers', line=dict(color=COLOR_RED_ACC, width=3), name="Danno Cumulato %"))
     fig_timeline.add_hline(y=100, line_dash="dash", line_color="black", annotation_text="Punto di Rottura")
@@ -580,7 +627,7 @@ else:
     st.plotly_chart(fig_timeline, use_container_width=True)
 
 if csv_preview_df is not None:
-    with st.expander("Anteprima CSV normalizzato"):
+    with st.expander("Anteprima telemetria file normalizzata"):
         st.dataframe(csv_preview_df.head(200), use_container_width=True)
 
 # ==========================================
@@ -657,6 +704,21 @@ def create_timeline_temp_image():
     plt.title("Proiezione Danno su Macro-Cicli", fontsize=11, fontweight='bold')
     plt.xlabel("Anni", fontsize=9)
     plt.ylabel("Danno Cumulato %", fontsize=9)
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    plt.savefig(tmp_file.name, format="png", bbox_inches="tight", dpi=300)
+    plt.close()
+    return tmp_file.name
+
+def create_perf_years_temp_image():
+    plt.figure(figsize=(9, 3))
+    sns.set_theme(style="whitegrid")
+    plt.plot(anni_proj, rigidita_annua, color=COLOR_RED_ACC, marker='o', linewidth=2.5, label="Rigidita residua %")
+    plt.plot(anni_proj, prestazione_annua, color=COLOR_GOLD_ACC, marker='o', linewidth=2.5, label="Prestazione residua %")
+    plt.ylim(0, 105)
+    plt.title("Evoluzione Rigidita e Prestazione", fontsize=11, fontweight='bold')
+    plt.xlabel("Anni", fontsize=9)
+    plt.ylabel("Percentuale residua", fontsize=9)
+    plt.legend()
     tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     plt.savefig(tmp_file.name, format="png", bbox_inches="tight", dpi=300)
     plt.close()
@@ -745,15 +807,15 @@ def generate_full_pdf():
         pdf.add_table_row("Fattore Microclima", "Attivo", f"{ore_continue} ore continue")
     pdf.ln(2)
 
-    # --- SEZIONE 3: RISULTATI ---
-    pdf.chapter_title("3. Output Analisi Strutturale")
+    # --- SEZIONE 3A: RISULTATI VISTA INGEGNERE ---
+    pdf.chapter_title("3A. Output Analisi Strutturale - Vista Ingegnere")
     pdf.add_table_row("Grandezza", "Valore", "Unità", header=True)
     pdf.add_table_row("Limite Fatica Ideale", f"{mat['se_base']}", "MPa")
     pdf.add_table_row("Limite Fatica Reale (Se)", f"{int(se_corr)}", "MPa")
     pdf.add_table_row("Stress Teorico Primario", f"{int(s_eq)}", "MPa")
     if usa_miner:
         pdf.add_table_row("Stress Teorico Secondario", f"{int(s_eq_2)}", "MPa")
-    if uploaded_csv is not None or telemetria_manuale:
+    if uploaded_csv is not None or telemetria_manuale or not quick_df.empty:
         pdf.add_table_row("Spettro Telemetrico", "Attivo", "Dati inseriti")
     pdf.add_table_row("Danno Accumulato", f"{danno_totale*100:.2f} % / anno", "Miner Complessivo")
     pdf.add_table_row("Perdita Rigidità Stimata (1 anno)", f"-{perf_decay:.2f} %", "Decadimento")
@@ -761,6 +823,18 @@ def generate_full_pdf():
     pdf.add_table_row("Recovery Index", f"{recovery_index:.1f}", "%")
     pdf.add_table_row("Compliance Score", f"{compliance_score:.1f}", "%")
     pdf.add_table_row("Anomalie Telemetria", f"{anomaly_count}", "count")
+    pdf.ln(3)
+
+    # --- SEZIONE 3B: RISULTATI VISTA ATLETA ---
+    pdf.chapter_title("3B. Output Operativo - Vista Atleta")
+    pdf.add_table_row("Indicatore", "Valore", "Interpretazione", header=True)
+    spinta_residua_pdf = max(0.0, 100.0 - perf_decay)
+    pdf.add_table_row("Spinta elastica residua (Anno 1)", f"{spinta_residua_pdf:.1f}%", "Efficienza dinamica")
+    pdf.add_table_row("Risk Class", risk_class, "Basso/Medio/Alto")
+    pdf.add_table_row("Recovery Index", f"{recovery_index:.1f}%", "Capacita di recupero")
+    pdf.add_table_row("Compliance", f"{compliance_score:.1f}%", "Aderenza al piano")
+    stato_atleta = "READY TO COMPETE" if isinstance(years, (int, float)) and years > 2 else ("ATTENZIONE" if isinstance(years, (int, float)) and years > 0 else "RIGETTO")
+    pdf.add_table_row("Stato sintetico", stato_atleta, "Vista atleta")
     pdf.ln(3)
 
     # --- BOX CONCLUSIVO VITA ---
@@ -793,7 +867,6 @@ def generate_full_pdf():
     pdf.ln(3)
 
     # --- SEZIONE 6: OTTIMIZZAZIONE E HYSTERESIS ---
-    # NUOVO: Aggiunta Timeline Grafico PDF
     pdf.chapter_title("6. Proiezione Macro-Cicli e Hysteresis")
     img_path_timeline = create_timeline_temp_image()
     pdf.image(img_path_timeline, x=10, w=190)
@@ -805,6 +878,15 @@ def generate_full_pdf():
     os.remove(img_path_2)
 
     pdf.ln(5)
+
+    # --- SEZIONE 7: RIGIDITA E PRESTAZIONE ANNUA ---
+    pdf.chapter_title("7. Evoluzione Rigidita e Prestazione (Vista Atleta)")
+    img_path_perf = create_perf_years_temp_image()
+    pdf.image(img_path_perf, x=10, w=190)
+    os.remove(img_path_perf)
+    pdf.set_font('Arial', '', 9)
+    pdf.multi_cell(0, 5, "Il decadimento rappresenta la riduzione progressiva della risposta elastica. La curva rigidita e una stima conservativa; la curva prestazione e una stima funzionale del gesto sportivo.")
+    pdf.ln(3)
 
     if isinstance(years, (int, float)) and years >= 4:
         stato_protesi = "si trova in un range di sicurezza strutturale eccellente"
@@ -834,33 +916,3 @@ if st.button("📄 Genera Wohler Sim Report"):
     except Exception as e:
         st.error(f"Errore Generazione PDF: {e}")
 
-if export_kpi_csv:
-    kpi_df = pd.DataFrame([
-        {"kpi": "stress_eq_mpa", "value": round(float(s_eq), 2)},
-        {"kpi": "se_corr_mpa", "value": round(float(se_corr), 2)},
-        {"kpi": "danno_totale_annuo_pct", "value": round(float(danno_totale * 100), 2)},
-        {"kpi": "risk_class", "value": risk_class},
-        {"kpi": "recovery_index", "value": round(float(recovery_index), 2)},
-        {"kpi": "compliance_score", "value": round(float(compliance_score), 2)},
-    ])
-    st.download_button("📥 Export KPI CSV", kpi_df.to_csv(index=False), "supernova_kpi.csv", "text/csv")
-
-if export_json_tech:
-    st.download_button(
-        "📦 Export Tecnico JSON",
-        data=json.dumps({
-            "user": st.session_state["username"],
-            "athlete": atleta_nome,
-            "timestamp": datetime.datetime.now().isoformat(),
-            "model": {
-                "material": mat_name,
-                "se_corr": se_corr,
-                "s_eq": s_eq,
-                "years": years,
-                "risk_class": risk_class,
-                "maintenance_plan": maintenance_note
-            }
-        }, indent=2, ensure_ascii=False),
-        file_name="supernova_export_tecnico.json",
-        mime="application/json",
-    )
